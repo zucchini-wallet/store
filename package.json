@@ -1,0 +1,30 @@
+{
+  "name": "@zucchinifi/store",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.19 <23"
+  },
+  "scripts": {
+    "dev": "node --env-file-if-exists=.env src/server.mjs",
+    "start": "node --env-file-if-exists=.env src/server.mjs",
+    "build": "node scripts/build.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "catalog:sync": "node --env-file-if-exists=.env scripts/catalog-sync.mjs",
+    "scan": "node --env-file-if-exists=.env scripts/collector.mjs",
+    "check": "prettier --check 'src/*.mjs' 'cloudflare/*.mjs' 'scripts/*.mjs' 'tests/*.mjs' 'public/*.{html,css,js}' package.json wrangler.jsonc",
+    "deploy": "npm run check && npm test && npm run build && wrangler deploy"
+  },
+  "dependencies": {
+    "@zucchinifi/dapp-sdk": "0.2.0",
+    "@zucchinifi/zcash-scanner": "0.1.0",
+    "decimal.js": "10.6.0",
+    "esbuild": "0.25.10"
+  },
+  "devDependencies": {
+    "prettier": "3.6.2",
+    "wrangler": "4.147.0"
+  }
+}

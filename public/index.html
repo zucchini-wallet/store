@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta
+      name="description"
+      content="Digital gift cards, paid with private Zcash. Connect Zucchini Wallet and shop your favourite brands."
+    />
+    <title>Zucchini Store — gift cards with Zcash</title>
+    <link rel="icon" href="/logo.png" />
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <header class="header">
+      <a class="brand" href="/"
+        ><img src="/logo.png" alt="" /><span>zucchini<span class="brand-sub">store</span></span></a
+      >
+      <nav>
+        <button class="text-button" id="how">How it works</button
+        ><button class="text-button" id="orders">My orders</button
+        ><a href="https://zucchinifi.xyz" rel="noopener" class="wallet-link"
+          >Get the wallet <span aria-hidden="true">↗</span></a
+        >
+      </nav>
+    </header>
+    <main>
+      <section class="hero">
+        <div class="hero-copy">
+          <p class="eyebrow">A LITTLE GIFT. A LOT OF POSSIBILITIES.</p>
+          <h1>Your ZEC.<br /><em>Everyday delights.</em></h1>
+          <p class="intro">
+            Pick a brand. Pay with Zcash.<br />Make someone’s day — including your own.
+          </p>
+          <div class="hero-note">
+            <span class="shield" aria-hidden="true">◈</span> Private payment. Digital delivery. No
+            account required.
+          </div>
+        </div>
+        <div class="hero-art" aria-hidden="true">
+          <div class="gift-card back-card">
+            <span>FOR YOUR NEXT ADVENTURE</span><strong>Something<br />to look forward to.</strong>
+          </div>
+          <div class="gift-card front-card">
+            <img src="/logo.png" alt="" /><span>ZUCCHINI STORE</span
+            ><strong>Good things.<br /><em>Gifted.</em></strong>
+            <div class="card-bottom">PAID IN ZCASH <span>✦</span></div>
+          </div>
+          <div class="floating-note">A gift, without the guesswork.</div>
+        </div>
+      </section>
+      <section class="catalog" aria-labelledby="catalog-title">
+        <div class="catalog-heading">
+          <div>
+            <p class="eyebrow">FIND THEIR FAVOURITE</p>
+            <h2 id="catalog-title">A world of gift cards.</h2>
+          </div>
+          <label class="country-label"
+            >Shop in<select id="country" aria-label="Gift-card country"></select
+          ></label>
+        </div>
+        <div class="catalog-tools">
+          <label class="search"
+            ><span aria-hidden="true">⌕</span
+            ><input
+              id="search"
+              type="search"
+              placeholder="Search brands or gift cards"
+              autocomplete="off"
+            /><span class="search-shortcut">⌘ K</span></label
+          >
+          <div class="filters" id="filters">
+            <button class="chip active" data-search="">All cards</button
+            ><button class="chip" data-search="shopping">Shopping</button
+            ><button class="chip" data-search="food">Food & drink</button
+            ><button class="chip" data-search="gaming">Gaming</button
+            ><button class="chip" data-search="travel">Travel</button>
+          </div>
+        </div>
+        <div class="catalog-status">
+          <span id="result-count">Finding something good…</span><span id="availability"></span>
+        </div>
+        <div class="product-grid" id="products" aria-live="polite"></div>
+        <button id="more" class="secondary" hidden>Show more gift cards</button>
+        <p id="catalog-error" class="error" role="alert" hidden></p>
+      </section>
+      <section class="promise">
+        <div>
+          <span>01</span>
+          <h3>Keep it private.</h3>
+          <p>Pay directly from your Zcash wallet. No store account or card details to hand over.</p>
+        </div>
+        <div>
+          <span>02</span>
+          <h3>Make it personal.</h3>
+          <p>
+            Choose the country and amount. Gift-card redemption follows the brand’s local terms.
+          </p>
+        </div>
+        <div>
+          <span>03</span>
+          <h3>Ready when it’s ready.</h3>
+          <p>We confirm your payment, then get your card. Follow every step on your order page.</p>
+        </div>
+      </section>
+    </main>
+    <footer>
+      <div class="brand"><img src="/logo.png" alt="" /><span>zucchini store</span></div>
+      <p>Good gifts. Private payments.</p>
+      <div>
+        <button class="text-button" data-info="privacy">Privacy</button
+        ><button class="text-button" data-info="terms">Purchase terms</button
+        ><button class="text-button" data-info="support">Help</button>
+      </div>
+    </footer>
+    <dialog id="product-dialog" aria-labelledby="product-title">
+      <button class="close" data-close aria-label="Close gift-card details">×</button>
+      <div class="product-intro">
+        <img id="product-icon" alt="" />
+        <div>
+          <p id="product-country" class="eyebrow"></p>
+          <h2 id="product-title"></h2>
+        </div>
+      </div>
+      <p id="product-description" class="muted"></p>
+      <form id="quote-form">
+        <label id="variant-label" hidden>Card option<select id="variant"></select></label
+        ><label
+          >Gift-card amount<select id="fixed-amount"></select
+          ><input id="flexible-amount" type="number" min="1" step="0.01" hidden
+        /></label>
+        <p id="amount-hint" class="hint"></p>
+        <div class="email-choice">
+          <label class="checkbox"
+            ><input type="checkbox" id="email-opt" />Email me a copy when my card is ready</label
+          ><input
+            id="email"
+            type="email"
+            placeholder="you@example.com"
+            autocomplete="email"
+            hidden
+          />
+          <p class="hint">Optional. Your card will also be available on your order page.</p>
+        </div>
+        <label class="checkbox terms"
+          ><input type="checkbox" id="accept-terms" required />I’ve checked the country and accept
+          the purchase terms.</label
+        >
+        <p class="hint">
+          Cards are region-specific. After a card is issued, it generally cannot be returned.
+        </p>
+        <p id="quote-error" class="error" role="alert" hidden></p>
+        <button class="primary" id="get-quote">
+          Review Zcash total <span aria-hidden="true">→</span>
+        </button>
+        <p id="disabled-message" class="hint" hidden>
+          We’re preparing checkout. Browse the collection and come back soon.
+        </p>
+      </form>
+    </dialog>
+    <dialog id="checkout-dialog" aria-labelledby="checkout-title">
+      <button class="close" data-close aria-label="Close checkout">×</button>
+      <div class="checkout-top">
+        <p class="eyebrow" id="checkout-eyebrow">YOUR GIFT CARD</p>
+        <h2 id="checkout-title">A good choice.</h2>
+        <p id="checkout-brand" class="muted"></p>
+      </div>
+      <div id="review">
+        <div class="total">
+          <span>You pay</span><strong id="zec-total"></strong
+          ><span id="usd-total" class="muted"></span>
+        </div>
+        <div class="summary-line">
+          <span>Gift-card value</span><strong id="face-total"></strong>
+        </div>
+        <div class="summary-line"><span>Redeem in</span><strong id="redeem-country"></strong></div>
+        <p class="hint" id="quote-expiry"></p>
+        <p class="hint">Your wallet shows its network fee before you approve.</p>
+      </div>
+      <ol class="steps" id="steps">
+        <li>Connect</li>
+        <li>Pay</li>
+        <li>Receive</li>
+      </ol>
+      <div id="order-status" role="status" aria-live="polite"></div>
+      <p id="checkout-error" class="error" role="alert" hidden></p>
+      <button id="checkout-action" class="primary">Connect Zucchini Wallet</button>
+      <div id="gift-details" hidden></div>
+      <div class="order-actions">
+        <button id="copy-order" class="text-button">Save private order link</button
+        ><button id="cancel-order" class="text-button">Cancel quote</button
+        ><button id="refund-order" class="text-button" hidden>Request refund review</button>
+      </div>
+      <p class="hint" id="order-reference"></p>
+      <p class="hint">Keep your order link private. Anyone with it can view your gift card.</p>
+    </dialog>
+    <dialog id="info-dialog" aria-labelledby="info-title">
+      <button class="close" data-close aria-label="Close information">×</button>
+      <h2 id="info-title"></h2>
+      <div id="info-body"></div>
+    </dialog>
+    <div id="toast" role="status" aria-live="polite" hidden></div>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
