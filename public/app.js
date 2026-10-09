@@ -34,7 +34,8 @@ let config,
   connected = false,
   busy = false,
   poll,
-  toastTimer;
+  toastTimer,
+  recoverySaved = false;
 const sessions = () => {
   try {
     return JSON.parse(localStorage.getItem('zucchini-store-orders') ?? '[]')
@@ -50,8 +51,10 @@ const save = (session) => {
       'zucchini-store-orders',
       JSON.stringify([session, ...sessions().filter((o) => o.id !== session.id)].slice(0, 20)),
     );
+    return true;
   } catch {
     toast('Browser storage unavailable. Copy your private order link.');
+    return false;
   }
 };
 function toast(text) {
@@ -130,13 +133,25 @@ const infoContent = {
   ],
 };
 for (const button of document.querySelectorAll('[data-info]'))
-  button.onclick = () =>
-    info(...[infoContent[button.dataset.info][0], infoContent[button.dataset.info].slice(1)]);
+  button.onclick = () => {
+    const content =
+      config.giftCardProvider === 'cryptorefills' &&
+      ['privacy', 'terms'].includes(button.dataset.info)
+        ? [
+            button.dataset.info === 'privacy' ? 'Privacy' : 'Purchase terms',
+            'Cryptorefills is the seller and delivers to your real email. We share your email, customer IP and selected product with Cryptorefills. Their terms and privacy policy apply.',
+            'Zucchini converts your shielded ZEC to Solana USDC to pay the order. Conversion, late payments and refunds require review; a provider refund does not automatically refund ZEC. Your private recovery link grants access to your order.',
+          ]
+        : infoContent[button.dataset.info];
+    info(content[0], content.slice(1));
+  };
 $('how').onclick = () =>
   info('Three small steps.', [
     'Choose a gift card for the country where it will be redeemed. Review the amount and connect your wallet.',
     'Connect first, then confirm payment. We never ask for your seed phrase.',
-    'After Zcash confirmations, we order the card and display its details here. Save your private order link to return later. Email delivery is optional.',
+    config.giftCardProvider === 'cryptorefills'
+      ? 'After Zcash confirmations and conversion, Cryptorefills delivers to your required email. Save your private order link to return later.'
+      : 'After Zcash confirmations, we order the card and display its details here. Save your private order link to return later. Email delivery is optional.',
   ]);
 for (const button of document.querySelectorAll('[data-close]'))
   button.onclick = () => button.closest('dialog').close();
@@ -261,12 +276,23 @@ function updateProduct(v) {
   $('disabled-message').hidden = config.checkoutReady;
   $('email-opt').disabled = !config.emailAvailable;
   $('email-opt').checked = false;
-  $('email').hidden = true;
+  const cr = config.giftCardProvider === 'cryptorefills';
+  $('email').hidden = !cr;
+  $('email').required = cr;
+  $('email-hint').textContent = cr
+    ? 'Required for Cryptorefills delivery. No newsletter enrollment.'
+    : 'Optional. Your card will also be available on your order page.';
+  $('cryptorefills-disclosure').hidden = !cr;
+  for (const id of ['provider-terms', 'provider-privacy']) {
+    $(id).required = cr;
+    $(id).checked = false;
+  }
   $('accept-terms').checked = false;
 }
 $('email-opt').onchange = () => {
-  $('email').hidden = !$('email-opt').checked;
-  $('email').required = $('email-opt').checked;
+  const required = config.giftCardProvider === 'cryptorefills';
+  $('email').hidden = !required && !$('email-opt').checked;
+  $('email').required = required || $('email-opt').checked;
 };
 $('quote-form').onsubmit = async (e) => {
   e.preventDefault();
@@ -282,11 +308,22 @@ $('quote-form').onsubmit = async (e) => {
         selected.denominationMode === 'FIXED'
           ? $('fixed-amount').value
           : $('flexible-amount').value,
+      ...(config.fundingMode === 'shielded_buffer'
+        ? { replyAddress: $('reply-address').value.trim() }
+        : {}),
       emailOptIn: $('email-opt').checked,
-      ...($('email-opt').checked ? { email: $('email').value } : {}),
+      ...(config.giftCardProvider === 'cryptorefills'
+        ? {
+            email: $('email').value,
+            providerTermsAccepted: $('provider-terms').checked,
+            providerPrivacyAccepted: $('provider-privacy').checked,
+          }
+        : $('email-opt').checked
+          ? { email: $('email').value }
+          : {}),
     });
     current = { ...data.order, token: data.token };
-    save({ id: current.id, token: current.token, brand: current.brand });
+    recoverySaved = save({ id: current.id, token: current.token, brand: current.brand });
     connected = false;
     renderOrder();
     show($('checkout-dialog'));
@@ -444,12 +481,19 @@ async function copy(value, message) {
   try {
     await navigator.clipboard.writeText(value);
     toast(message);
+    return true;
   } catch {
     info('Save this privately.', [value]);
+    return false;
   }
 }
-$('copy-order').onclick = () =>
-  copy(`${location.origin}/#order=${current.id}&key=${current.token}`, 'Private order link copied');
+$('copy-order').onclick = async () => {
+  recoverySaved =
+    (await copy(
+      `${location.origin}/#order=${current.id}&key=${current.token}`,
+      'Private order link copied',
+    )) || recoverySaved;
+};
 $('checkout-action').onclick = async () => {
   if (busy || !current || current.state !== 'quoted') return;
   busy = true;
@@ -473,6 +517,8 @@ $('checkout-action').onclick = async () => {
       toast('Wallet connected');
       return;
     }
+    if (!recoverySaved)
+      throw Error('Save your private order link before paying. Browser storage is unavailable.');
     const result = await api(`/api/orders/${current.id}/pay`, {}, current.token);
     current = { ...result.order, token: current.token };
     save({ id: current.id, token: current.token, brand: current.brand });
@@ -560,7 +606,7 @@ async function openOrder(id, token) {
     const data = await api(`/api/orders/${id}`, undefined, token);
     current = { ...data.order, token };
     connected = false;
-    save({ id, token, brand: current.brand });
+    recoverySaved = save({ id, token, brand: current.brand });
     renderOrder();
     show($('checkout-dialog'));
     startPoll();
@@ -592,8 +638,12 @@ try {
   config = await api('/api/config');
   $('availability').textContent = config.checkoutReady
     ? 'Pay with Zcash'
-    : 'Browse now · checkout coming soon';
+    : config.catalogPreview
+      ? 'Preview catalog · purchases unavailable'
+      : 'Browse now · checkout coming soon';
   if (config.network === 'testnet') $('availability').textContent = 'Testnet · no real purchases';
+  $('reply-label').hidden = config.fundingMode !== 'shielded_buffer';
+  $('catalog-preview').hidden = !config.catalogPreview;
   await loadCatalog();
   const hash = new URLSearchParams(location.hash.slice(1));
   if (

@@ -50,6 +50,10 @@
         </div>
       </section>
       <section class="catalog" aria-labelledby="catalog-title">
+        <p id="catalog-preview" class="hint" hidden>
+          Preview of the previous 0fiat catalog. Cryptorefills availability is still being verified;
+          purchases are unavailable.
+        </p>
         <div class="catalog-heading">
           <div>
             <p class="eyebrow">FIND THEIR FAVOURITE</p>
@@ -124,6 +128,9 @@
       </div>
       <p id="product-description" class="muted"></p>
       <form id="quote-form">
+        <label id="reply-label" hidden
+          >Shielded reply address <input id="reply-address" autocomplete="off"
+        /></label>
         <label id="variant-label" hidden>Card option<select id="variant"></select></label
         ><label
           >Gift-card amount<select id="fixed-amount"></select
@@ -140,7 +147,33 @@
             autocomplete="email"
             hidden
           />
-          <p class="hint">Optional. Your card will also be available on your order page.</p>
+          <p id="email-hint" class="hint">
+            Optional. Your card will also be available on your order page.
+          </p>
+        </div>
+        <div id="cryptorefills-disclosure" hidden>
+          <p>
+            Sold and delivered by Cryptorefills. Your delivery email and IP address are shared with
+            Cryptorefills. Zucchini converts your ZEC to pay your order.
+          </p>
+          <label class="checkbox"
+            ><input type="checkbox" id="provider-terms" />I accept the
+            <a
+              href="https://www.cryptorefills.com/en/terms-of-service"
+              target="_blank"
+              rel="noopener noreferrer"
+              >Cryptorefills terms</a
+            >.</label
+          >
+          <label class="checkbox"
+            ><input type="checkbox" id="provider-privacy" />I accept the
+            <a
+              href="https://www.cryptorefills.com/en/privacy-policy"
+              target="_blank"
+              rel="noopener noreferrer"
+              >Cryptorefills privacy policy</a
+            >.</label
+          >
         </div>
         <label class="checkbox terms"
           ><input type="checkbox" id="accept-terms" required />I’ve checked the country and accept

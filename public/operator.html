@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+  <meta charset="utf-8" /><meta
+    name="viewport"
+    content="width=device-width,initial-scale=1"
+  /><title>Store operator settlement</title
+  ><link rel="stylesheet" href="/style.css" />
+  <main>
+    <h1>Operator settlement</h1>
+    <p>
+      Wallet payments require your approval. Never resend after an interrupted request; reconcile
+      the saved attempt first.
+    </p>
+    <label>Operator token <input id="token" type="password" autocomplete="off" /></label
+    ><button id="load">Load settlements</button><label>Order ID <input id="order" /></label
+    ><label
+      >Action
+      <select id="action">
+        <option>prepare_conversion</option>
+        <option>begin_conversion</option>
+        <option>submit_conversion</option>
+        <option>check_conversion</option>
+        <option>prepare_topup</option>
+        <option>begin_topup</option>
+        <option>submit_topup</option>
+        <option>check_topup</option>
+        <option>check_delivery</option>
+        <option>prepare_reply</option>
+        <option>begin_reply</option>
+        <option>submit_reply</option>
+        <option>check_reply</option>
+      </select></label
+    ><label>Transaction ID, for recording an existing submission <input id="txid" /></label
+    ><button id="run">Run action</button
+    ><button id="send">Approve prepared Zcash payment in wallet</button>
+    <label
+      >Merchant Solana wallet
+      <select id="solana-wallet">
+        <option value="">Select a compatible wallet</option>
+      </select></label
+    >
+    <button id="refresh-wallets">Refresh wallets</button>
+    <button id="use-solana-wallet">Use selected wallet for prepared payments</button>
+    <button id="sendSolana" disabled>Approve prepared Solana USDC payment</button>
+    <pre id="output" aria-live="polite"></pre>
+    <script type="module" src="/operator.js"></script>
+  </main>
+</html>

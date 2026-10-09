@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
-import { cleanCatalog } from '../src/catalog.mjs';
+import { cleanCatalog, catalogProvider } from '../src/catalog.mjs';
 const [origin, secretsFile, catalogFile] = process.argv.slice(2);
 if (!origin || !secretsFile || !catalogFile)
   throw Error('Usage: catalog-publish <store-origin> <private-runtime-json> <catalog-json>');
@@ -18,7 +18,12 @@ async function send(value) {
   const response = await fetch(url.origin + '/internal/catalog', {
     method: 'POST',
     headers: { Authorization: `Bearer ${secrets.ADMIN_TOKEN}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ...value, version, fetchedAt: catalog.fetchedAt }),
+    body: JSON.stringify({
+      ...value,
+      version,
+      fetchedAt: catalog.fetchedAt,
+      provider: catalogProvider(catalog.provider),
+    }),
     signal: AbortSignal.timeout(30000),
     redirect: 'error',
   });

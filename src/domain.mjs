@@ -1,3 +1,4 @@
+import { paymentMemo, matchesPaymentMemo } from './payment-memo.mjs';
 import { Buffer } from 'node:buffer';
 import Decimal from 'decimal.js';
 import { invoiceMemo, reconcileMerchantReceipts } from '@zucchinifi/dapp-sdk/merchant/server';
@@ -63,7 +64,7 @@ export function priceOrder(quote, { rate, rateAt, now, markupBps, maxUsd }) {
 }
 export function paymentUri(order) {
   const amount = new Decimal(order.amountZatoshis).div(1e8).toFixed(8);
-  const memo = Buffer.from(invoiceMemo(order.id)).toString('base64url');
+  const memo = Buffer.from(paymentMemo(order)).toString('base64url');
   return `zcash:${order.recipient}?amount=${amount}&memo=${memo}`;
 }
 export function reconcile(order, snapshot, now, requiredConfirmations) {
@@ -75,7 +76,12 @@ export function reconcile(order, snapshot, now, requiredConfirmations) {
       amountZatoshis: order.amountZatoshis,
       expiresAt: order.expiresAt,
     },
-    snapshot,
+    snapshot && {
+      ...snapshot,
+      receipts: snapshot.receipts
+        .filter((r) => matchesPaymentMemo(r, order))
+        .map((r) => ({ ...r, memo: invoiceMemo(order.id) })),
+    },
     { now, requiredConfirmations, previouslyPaid: order.everPaid },
   );
 }

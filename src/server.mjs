@@ -1,3 +1,4 @@
+import { createRuntimeSettlement } from './runtime-settlement.mjs';
 import { credentials } from './credentials.mjs';
 import { createApp } from './application.mjs';
 import { catalogPage, cleanCatalog } from './catalog.mjs';
@@ -34,11 +35,22 @@ if (isMain) {
   } catch {
     catalog = { fetchedAt: null, vouchers: [] };
   }
-  const provider = config.providerFile
-    ? createProvider(await credentials(config.providerFile))
-    : undefined;
+  const provider =
+    config.giftCardProvider === '0fiat' && config.providerFile
+      ? createProvider(await credentials(config.providerFile))
+      : undefined;
   const fulfillment = provider ? createFulfillment({ store, provider, config }) : undefined;
-  const app = createApp({ config, store, provider, catalog });
+  const runtime =
+    config.giftCardProvider === 'cryptorefills'
+      ? createRuntimeSettlement({ config, env: process.env })
+      : {};
+  const app = createApp({
+    config,
+    store,
+    provider: runtime.provider ?? provider,
+    catalog,
+    ...runtime,
+  });
   const server = createServer(async (req, res) => {
     if (req.url.startsWith('/api/') || req.url.startsWith('/internal/'))
       return app.handler(req, res);
@@ -61,7 +73,7 @@ if (isMain) {
           }[extname(file)] ?? 'application/octet-stream',
         'X-Content-Type-Options': 'nosniff',
         'Content-Security-Policy':
-          "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' https://0fiat.com; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+          "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' https://0fiat.com https://cdn.cryptorefills.com; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
         'Referrer-Policy': 'no-referrer',
       });
       res.end(bytes);
@@ -75,7 +87,19 @@ if (isMain) {
       `Zucchini Store: http://127.0.0.1:${config.port} (checkout ${config.checkoutEnabled ? 'enabled' : 'disabled'})`,
     ),
   );
-  const timer = setInterval(() => void fulfillment?.tick(), 15000);
+  let ticking = false;
+  const timer = setInterval(async () => {
+    if (ticking) return;
+    ticking = true;
+    try {
+      await app.tick();
+      await fulfillment?.tick();
+    } catch {
+      console.error('Background recovery unavailable');
+    } finally {
+      ticking = false;
+    }
+  }, 15000);
   timer.unref();
   for (const signal of ['SIGINT', 'SIGTERM'])
     process.on(signal, () => {

@@ -1,3 +1,4 @@
+import { paymentMemo } from '../src/payment-memo.mjs';
 import { createReceiptScanner } from '@zucchinifi/zcash-scanner';
 import { readFile, writeFile, rename, mkdir, open, unlink, stat } from 'node:fs/promises';
 import { resolve, dirname } from 'node:path';
@@ -72,7 +73,7 @@ try {
     let delay = 15000;
     try {
       const { orders } = await api('/internal/orders');
-      const wanted = new Set(orders.map((o) => `zucchini:${o.id}`));
+      const wanted = new Set(orders.map(paymentMemo));
       const batch = await scanner.scan({
         from: Math.max(birthday, state.scannedHeight - (state.caughtUp ? 20 : 0) + 1),
         limit: 100,

@@ -1,3 +1,4 @@
+import { matchesPaymentMemo } from './payment-memo.mjs';
 export function reconcileBatch(state, batch, birthday, observedAt) {
   if (batch.network !== state.network || !Array.isArray(batch.blocks))
     throw Error('Scanner network changed');
@@ -50,7 +51,7 @@ export function snapshotFor(state, order) {
     scannedHeight: state.scannedHeight,
     receipts: state.blocks
       .flatMap((b) => b.receipts)
-      .filter((r) => r.recipient === order.recipient && r.memo === `zucchini:${order.id}`)
+      .filter((r) => r.recipient === order.recipient && matchesPaymentMemo(r, order))
       .map((r) => ({ ...r, receivedAt: state.seen[`${r.txid}/${r.pool}/${r.outputIndex}`] })),
   };
 }

@@ -4,8 +4,8 @@ await rm('dist', { recursive: true, force: true });
 await mkdir('dist');
 await cp('public', 'dist', { recursive: true });
 await build({
-  entryPoints: ['public/app.js'],
-  outfile: 'dist/app.js',
+  entryPoints: ['public/app.js', 'public/operator.js'],
+  outdir: 'dist',
   bundle: true,
   format: 'esm',
   minify: true,

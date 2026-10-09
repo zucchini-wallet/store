@@ -1,3 +1,7 @@
+export function catalogProvider(value = '0fiat') {
+  if (!['0fiat', 'cryptorefills'].includes(value)) throw Error('Invalid catalog provider');
+  return value;
+}
 const categories = {
   shopping: /amazon|walmart|target|ikea|adidas|nike|fashion|hardware|department|flipkart|myntra/i,
   food: /restaurant|food|pizza|burger|coffee|starbucks|dunkin|dining|grill|doordash|ubereats|zomato|swiggy|pub|subway/i,

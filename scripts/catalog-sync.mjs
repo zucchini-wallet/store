@@ -14,6 +14,10 @@ if (process.argv.includes('--import')) {
   await writeFile(target, JSON.stringify(catalog), { mode: 0o600 });
   console.log(`Imported ${catalog.vouchers.length} gift cards.`);
 } else {
+  if (process.env.GIFT_CARD_PROVIDER === 'cryptorefills')
+    throw Error(
+      'Cryptorefills catalog schema adapter is not configured; use a reviewed normalized import.',
+    );
   const provider = createProvider(await credentials(process.env.OFIAT_ENV_FILE)),
     vouchers = [];
   for (let offset = 0; offset < 50000; offset += 200) {
@@ -26,7 +30,11 @@ if (process.argv.includes('--import')) {
   if (!vouchers.length || vouchers.length >= 50000) throw Error('Incomplete catalog');
   await writeFile(
     target + '.tmp',
-    JSON.stringify({ fetchedAt: new Date().toISOString(), vouchers: cleanCatalog(vouchers) }),
+    JSON.stringify({
+      provider: '0fiat',
+      fetchedAt: new Date().toISOString(),
+      vouchers: cleanCatalog(vouchers),
+    }),
     { mode: 0o600 },
   );
   await rename(target + '.tmp', target);

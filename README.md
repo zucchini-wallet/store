@@ -9,6 +9,15 @@ scanner, fulfillment email, support address and provider funds are configured.
 The code includes the payment and fulfillment lifecycle; mock acceptance tests
 are not evidence of a funded production purchase.
 
+## Cryptorefills migration
+
+A local Cryptorefills partner path now supports per-order Solana USDC payments,
+idempotent creation, matched delivery evidence, and required email/provider consent.
+It reuses the buffered conversion and private recovery flow. Live checkout stays
+blocked; Cloudflare transport wiring and wallet discovery are prepared; provider
+response/catalog mappings and payment/refund policy still need review. See [integration contract](docs/cryptorefills.md). Existing 0fiat orders
+retain their original provider.
+
 ## Run
 
 Use Node 22.19 (the lockfile and CI pin the runtime):

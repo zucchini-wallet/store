@@ -1,3 +1,5 @@
+import { createRuntimeSettlement } from '../src/runtime-settlement.mjs';
+import { catalogProvider } from '../src/catalog.mjs';
 import { Buffer } from 'node:buffer';
 import { DurableObject } from 'cloudflare:workers';
 import { createApp } from '../src/application.mjs';
@@ -41,15 +43,20 @@ export class Store extends DurableObject {
         env.DATA_ENCRYPTION_KEY,
       );
       this.provider =
-        env.OFIAT_API_KEY && env.OFIAT_API_SECRET
+        this.config.giftCardProvider === '0fiat' && env.OFIAT_API_KEY && env.OFIAT_API_SECRET
           ? createProvider({ API_KEY: env.OFIAT_API_KEY, API_SECRET: env.OFIAT_API_SECRET })
           : undefined;
+      const runtime =
+        this.config.giftCardProvider === 'cryptorefills'
+          ? createRuntimeSettlement({ config: this.config, env })
+          : {};
       this.reloadCatalog();
       this.app = createApp({
         config: this.config,
         store: this.store,
-        provider: this.provider,
+        provider: runtime.provider ?? this.provider,
         catalog: this.catalog,
+        ...runtime,
       });
       this.fulfillment = this.provider
         ? createFulfillment({ store: this.store, provider: this.provider, config: this.config })
@@ -61,7 +68,8 @@ export class Store extends DurableObject {
       .exec('SELECT value FROM metadata WHERE key=?', 'catalog')
       .toArray()[0];
     if (!meta) return;
-    const { version, fetchedAt } = JSON.parse(meta.value);
+    const { version, fetchedAt, provider } = JSON.parse(meta.value);
+    this.catalog.provider = catalogProvider(provider);
     this.catalog.vouchers = cleanCatalog(
       this.ctx.storage.sql
         .exec('SELECT data FROM catalog WHERE version=? ORDER BY id', version)
@@ -82,6 +90,12 @@ export class Store extends DurableObject {
       if (text.length > 256000)
         return Response.json({ error: 'Request too large' }, { status: 413 });
       const b = JSON.parse(text);
+      const provider = catalogProvider(b.provider);
+      if (provider !== this.config.giftCardProvider)
+        return Response.json(
+          { error: 'Catalog provider does not match configuration' },
+          { status: 400 },
+        );
       if (!/^[a-f0-9-]{36}$/.test(b.version) || !Number.isFinite(Date.parse(b.fetchedAt)))
         return Response.json({ error: 'Invalid catalog version' }, { status: 400 });
       if (b.records) {
@@ -107,7 +121,7 @@ export class Store extends DurableObject {
           this.ctx.storage.sql.exec(
             'INSERT OR REPLACE INTO metadata VALUES(?,?)',
             'catalog',
-            JSON.stringify({ version: b.version, fetchedAt: b.fetchedAt }),
+            JSON.stringify({ version: b.version, fetchedAt: b.fetchedAt, provider }),
           );
           this.ctx.storage.sql.exec('DELETE FROM catalog WHERE version<>?', b.version);
         });
@@ -183,7 +197,7 @@ export class Store extends DurableObject {
       this.ctx.storage.sql.exec(
         'INSERT OR REPLACE INTO metadata VALUES(?,?)',
         'catalog',
-        JSON.stringify({ version, fetchedAt }),
+        JSON.stringify({ version, fetchedAt, provider: '0fiat' }),
       );
       this.ctx.storage.sql.exec('DELETE FROM catalog WHERE version<>?', version);
     });
@@ -191,6 +205,7 @@ export class Store extends DurableObject {
   }
   async alarm() {
     try {
+      await this.app.tick();
       await this.fulfillment?.tick();
     } finally {
       if (
@@ -198,6 +213,8 @@ export class Store extends DurableObject {
           .all()
           .some(
             (o) =>
+              (o.fundingMode === 'shielded_buffer' &&
+                !['reply_confirmed', 'conversion_review'].includes(o.settlement?.state)) ||
               ['payment_pending', 'fulfilling'].includes(o.state) ||
               (o.state === 'delivered' && o.emailOptIn && !o.emailSent && !o.emailNeedsReview),
           )
@@ -227,7 +244,7 @@ export default {
     const headers = new Headers(response.headers);
     headers.set(
       'Content-Security-Policy',
-      "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' https://0fiat.com; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+      "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' https://0fiat.com https://cdn.cryptorefills.com; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
     );
     headers.set('Referrer-Policy', 'no-referrer');
     headers.set('X-Content-Type-Options', 'nosniff');

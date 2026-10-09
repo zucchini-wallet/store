@@ -37,6 +37,7 @@ export function createFulfillment({
     store.update(order.id, (o) => (o.emailSent = true));
   }
   async function process(order) {
+    if (order.giftCardProvider === 'cryptorefills') return;
     if (order.state === 'delivered') {
       await email(order);
       return;
@@ -49,6 +50,8 @@ export function createFulfillment({
     }
     if (order.state === 'payment_pending' && !receipt.canFulfill) return;
     if (!config.fulfillmentEnabled) return;
+    if (order.fundingMode === 'shielded_buffer' && order.settlement?.state !== 'provider_credited')
+      return;
     // Check canonical receipt freshness again before any new provider side effect.
     if (order.state === 'payment_pending') {
       const q = await provider.request(
@@ -58,7 +61,9 @@ export function createFulfillment({
         q.currency !== 'USD' ||
         Number(q.voucherId) !== order.voucherId ||
         !new Decimal(q.faceAmount).eq(order.faceAmount) ||
-        new Decimal(q.payableAmount).gt(order.totalUsd)
+        new Decimal(q.payableAmount).gt(
+          order.fundingMode === 'shielded_buffer' ? order.costUsd : order.totalUsd,
+        )
       ) {
         store.update(order.id, (o) => {
           o.state = 'support_required';
