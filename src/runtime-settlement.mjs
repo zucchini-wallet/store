@@ -9,6 +9,45 @@ export function createRuntimeSettlement({ config, env, fetcher = fetch, mappings
   const keyConfigured =
     typeof env.CRYPTOREFILLS_PARTNER_KEY === 'string' &&
     Boolean(env.CRYPTOREFILLS_PARTNER_KEY.trim());
+  const backupKeyConfigured =
+    typeof env.CRYPTOREFILLS_BACKUP_PARTNER_KEY === 'string' &&
+    Boolean(env.CRYPTOREFILLS_BACKUP_PARTNER_KEY.trim()) &&
+    env.CRYPTOREFILLS_BACKUP_PARTNER_KEY !== env.CRYPTOREFILLS_PARTNER_KEY;
+  if (config.fundingMode === 'direct_swap') {
+    // A selection is not a funded implementation. Never compose the merchant
+    // buffer, scanner, Solana signer, or outgoing ZEC adapters for direct orders.
+    const solanaConfigured = Boolean(config.solanaRpcUrl);
+    const rpc = solanaConfigured
+      ? createSolanaRpc({ url: config.solanaRpcUrl, fetcher })
+      : undefined;
+    const blockers = [];
+    if (!keyConfigured) blockers.push('cryptorefills_partner_key');
+    if (!backupKeyConfigured) blockers.push('cryptorefills_backup_partner_key');
+    if (!config.cryptorefillsPartnerId) blockers.push('cryptorefills_public_partner_id');
+    if (!solanaConfigured) blockers.push('solana_invoice_account_rpc');
+    blockers.push(
+      'reviewed_v6_invoice_price_and_delivery_mappings',
+      'renewable_gateway_installation_session',
+      'gateway_exact_output_execution_and_recovery',
+      'swap_recipient_matches_invoice_token_account',
+      'customer_refund_and_quote_expiry_wallet_flow',
+      'direct_checkout_state_machine',
+      'funded_acceptance',
+    );
+    return {
+      runtimeReadiness: Object.freeze({
+        fundingMode: 'direct_swap',
+        keyConfigured,
+        backupKeyConfigured,
+        solanaConfigured,
+        gatewayConfigured: false,
+        schemaConfigured: false,
+        checkoutActivatable: false,
+        blockers,
+      }),
+      getSolanaBlockHeight: rpc ? () => rpc.getCurrentBlockHeight() : undefined,
+    };
+  }
   const gatewayConfigured = Boolean(config.gatewayOrigin && env.GATEWAY_SESSION_TOKEN);
   const solanaConfigured = Boolean(
     config.solanaRpcUrl &&
@@ -20,7 +59,13 @@ export function createRuntimeSettlement({ config, env, fetcher = fetch, mappings
     (name) => typeof mappings?.[name] === 'function',
   );
   const rawProvider = keyConfigured
-    ? createCryptorefillsProvider({ key: env.CRYPTOREFILLS_PARTNER_KEY }, { fetcher })
+    ? createCryptorefillsProvider(
+        {
+          key: env.CRYPTOREFILLS_PARTNER_KEY,
+          ...(backupKeyConfigured ? { backupKey: env.CRYPTOREFILLS_BACKUP_PARTNER_KEY } : {}),
+        },
+        { fetcher },
+      )
     : undefined;
   const rpc = solanaConfigured ? createSolanaRpc({ url: config.solanaRpcUrl, fetcher }) : undefined;
   const gateway = gatewayConfigured

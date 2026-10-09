@@ -1,22 +1,26 @@
 # Zucchini Store
 
 A gift-card storefront at **store.zucchinifi.xyz**, paid in Zcash through
-`@zucchinifi/dapp-sdk`. The store is a reseller using 0fiat's prepaid merchant
-API. It is separate from the wallet, gateway and merchant-domain registry.
+`@zucchinifi/dapp-sdk`. The selected provider is Cryptorefills, the merchant of
+record. Historical 0fiat orders retain their prepaid reseller flow. The store is
+separate from the wallet, gateway and merchant-domain registry.
 
-**Current launch state:** browse-only until the receiving wallet and private
-scanner, fulfillment email, support address and provider funds are configured.
-The code includes the payment and fulfillment lifecycle; mock acceptance tests
-are not evidence of a funded production purchase.
+**Current launch state:** browse-only; direct customer-funded checkout is being
+prepared. The selected flow is customer ZEC → swap provider → invoice USDC
+directly to Cryptorefills. No merchant buffer or receipt collector is needed for
+that route. Reviewed provider responses, exact-output execution, wallet expiry,
+refund handling and a direct coordinator still block real-funds testing.
 
 ## Cryptorefills migration
 
-A local Cryptorefills partner path now supports per-order Solana USDC payments,
-idempotent creation, matched delivery evidence, and required email/provider consent.
-It reuses the buffered conversion and private recovery flow. Live checkout stays
-blocked; Cloudflare transport wiring and wallet discovery are prepared; provider
-response/catalog mappings and payment/refund policy still need review. See [integration contract](docs/cryptorefills.md). Existing 0fiat orders
-retain their original provider.
+The direct flow supersedes the earlier disabled buffered proposal. Pure invoice,
+recipient and quote checks do not create orders or move funds. Provider HTTP
+requests bind idempotency, email and trusted customer IP, support one backup-key
+failover on 401, and stop repeat requests during a 429 cooldown. See the
+[direct architecture](docs/direct-payment.md) and
+[reviewed provider contract](docs/cryptorefills-contract-review.md).
+Wallet connection uses the Zucchini SDK and remains separate from payment.
+Mock tests do not establish live API compatibility or funded delivery.
 
 ## Run
 

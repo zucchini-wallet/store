@@ -230,7 +230,10 @@ for (const button of document.querySelectorAll('[data-info]'))
         ? [
             button.dataset.info === 'privacy' ? 'Privacy' : 'Purchase terms',
             'Cryptorefills is the seller and delivers to your real email. We share your email, customer IP and selected product with Cryptorefills. Their terms and privacy policy apply.',
-            'Zucchini converts your shielded ZEC to Solana USDC to pay the order. Conversion, late payments and refunds require review; a provider refund does not automatically refund ZEC. Your private recovery link grants access to your order.',
+            config.fundingMode === 'direct_swap'
+              ? 'The planned payment route sends ZEC from your wallet to the swap provider, which sends USDC on Solana directly to Cryptorefills. Deposit and refund addresses are transparent. Checkout is unavailable while this route is verified.'
+              : 'Zucchini converts your ZEC to Solana USDC to pay the order. Conversion, late payments and refunds require review; a provider refund does not automatically refund ZEC. Your private recovery link grants access to your order.',
+            'A failed swap or unused ZEC input is returned to your own Zcash refund address. After a successful swap, Cryptorefills handles eligible refunds through its emailed refund form, in the payment coin and network or as a coupon depending on the case. A USDC refund is not automatically converted back to ZEC.',
           ]
         : infoContent[button.dataset.info];
     info(content[0], content.slice(1));
@@ -240,7 +243,9 @@ $('how').onclick = () =>
     'Choose a gift card for the country where it will be redeemed. Review the amount and connect your wallet.',
     'Connect first, then confirm payment. We never ask for your seed phrase.',
     config.giftCardProvider === 'cryptorefills'
-      ? 'After Zcash confirmations and conversion, Cryptorefills delivers to your required email. Save your private order link to return later.'
+      ? config.fundingMode === 'direct_swap'
+        ? 'When direct checkout is available, the swap sends USDC directly to Cryptorefills, which delivers to your required email. Save your private order link to return later.'
+        : 'After Zcash confirmations and conversion, Cryptorefills delivers to your required email. Save your private order link to return later.'
       : 'After Zcash confirmations, we order the card and display its details here. Save your private order link to return later. Email delivery is optional.',
   ]);
 for (const button of document.querySelectorAll('[data-close]'))
@@ -728,6 +733,10 @@ try {
       : 'Browse now · checkout coming soon';
   if (config.network === 'testnet') $('availability').textContent = 'Testnet · no real purchases';
   $('reply-label').hidden = config.fundingMode !== 'shielded_buffer';
+  $('provider-payment-flow').textContent =
+    config.fundingMode === 'direct_swap'
+      ? 'Direct checkout is being prepared: your wallet sends ZEC to the swap provider, which pays Cryptorefills in USDC on Solana. Zucchini does not receive these funds. Checkout remains unavailable.'
+      : 'Zucchini converts your ZEC to pay your order.';
   $('catalog-preview').hidden = !config.catalogPreview;
   await loadCatalog();
   const hash = new URLSearchParams(location.hash.slice(1));

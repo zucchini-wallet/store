@@ -12,6 +12,7 @@ export function loadConfig(env = process.env) {
   const c = {
     origin,
     giftCardProvider: env.GIFT_CARD_PROVIDER ?? '0fiat',
+    cryptorefillsPartnerId: env.CRYPTOREFILLS_PARTNER_ID,
     gatewayOrigin: env.GATEWAY_ORIGIN,
     solanaRpcUrl: env.SOLANA_RPC_URL,
     outgoingEvidenceOrigin: env.OUTGOING_EVIDENCE_ORIGIN,
@@ -51,7 +52,10 @@ export function loadConfig(env = process.env) {
     throw Error(
       'Cryptorefills live checkout is blocked pending reviewed response adapters and payment/refund policy.',
     );
-  if (!['prepaid', 'shielded_buffer'].includes(c.fundingMode)) throw Error('Invalid funding mode');
+  if (!['prepaid', 'shielded_buffer', 'direct_swap'].includes(c.fundingMode))
+    throw Error('Invalid funding mode');
+  if (c.fundingMode === 'direct_swap' && c.giftCardProvider !== 'cryptorefills')
+    throw Error('Direct swap requires Cryptorefills');
   if (c.fundingMode === 'shielded_buffer' && c.checkoutEnabled)
     throw Error(
       'Buffered checkout requires reviewed settlement adapters; production activation is blocked.',

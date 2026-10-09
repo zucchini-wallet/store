@@ -37,6 +37,19 @@ export function createGatewayAdapter({ origin, session, config, fetcher = fetch 
         !q.quote?.deposit
       )
         throw Error('Unverified gateway quote');
+      const rawDeadline = q.quote.deposit.deadline;
+      if (
+        typeof rawDeadline !== 'string' ||
+        !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/i.test(
+          rawDeadline,
+        )
+      )
+        throw Error('Invalid gateway quote deadline');
+      // The gateway returns RFC3339 with millisecond precision; the coordinator
+      // uses integer Unix seconds. Round down so normalization never extends it.
+      const deadline = Math.floor(Date.parse(rawDeadline) / 1000);
+      if (!Number.isSafeInteger(deadline) || deadline <= 0)
+        throw Error('Invalid gateway quote deadline');
       return {
         orderId: q.orderId,
         originAsset: q.originAsset,
@@ -47,7 +60,7 @@ export function createGatewayAdapter({ origin, session, config, fetcher = fetch 
         minimumOutputAtomic: q.quote.minimumAmountOutAtomic,
         depositAddress: q.quote.deposit.address,
         memo: q.quote.deposit.memo,
-        deadline: Date.parse(q.quote.deposit.deadline) / 1000,
+        deadline,
         signatureVerified: true,
       };
     },

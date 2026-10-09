@@ -57,6 +57,48 @@ test('provider catalog identity survives explicit normalization and rejects unsu
   assert.throws(() => catalogProvider('unknown'));
 });
 
+test('selected direct flow never composes merchant custody and cannot be activated by flags or old bindings', () => {
+  const values = {
+    ...env,
+    FUNDING_MODE: 'direct_swap',
+    CRYPTOREFILLS_PARTNER_ID: 'synthetic-public-id',
+    CRYPTOREFILLS_BACKUP_PARTNER_KEY: 'second-synthetic-private-key',
+    GATEWAY_ORIGIN: 'https://gateway.example',
+    GATEWAY_SESSION_TOKEN: 's'.repeat(40),
+    SOLANA_RPC_URL: 'https://rpc.example',
+    BUFFER_ADDRESS: '11111111111111111111111111111111',
+    SOLANA_MAX_FEE_LAMPORTS: '5000',
+    SOLANA_MAX_RENT_LAMPORTS: '0',
+    SCANNER_READY: 'true',
+  };
+  const runtime = createRuntimeSettlement({
+    config: loadConfig(values),
+    env: values,
+    mappings: { quoteProduct() {}, payment() {}, delivery() {} },
+    verifyReply() {},
+    fetcher: () => {
+      throw Error('No construction IO');
+    },
+  });
+  assert.equal(runtime.runtimeReadiness.fundingMode, 'direct_swap');
+  assert.equal(runtime.runtimeReadiness.backupKeyConfigured, true);
+  assert.equal(runtime.runtimeReadiness.solanaConfigured, true);
+  assert.equal(runtime.runtimeReadiness.checkoutActivatable, false);
+  assert.equal(runtime.runtimeReadiness.gatewayConfigured, false);
+  assert.equal(runtime.settlementAdapters, undefined);
+  assert.equal(runtime.cryptorefillsAdapters, undefined);
+  assert.equal(runtime.provider, undefined);
+  assert.ok(!runtime.runtimeReadiness.blockers.includes('solana_rpc_buffer_and_fee_policy'));
+  assert.ok(
+    runtime.runtimeReadiness.blockers.includes('gateway_exact_output_execution_and_recovery'),
+  );
+  assert.ok(
+    !JSON.stringify(runtime.runtimeReadiness).includes(values.CRYPTOREFILLS_BACKUP_PARTNER_KEY),
+  );
+  assert.throws(() => loadConfig({ ...values, CHECKOUT_ENABLED: 'true' }), /blocked/);
+  assert.throws(() => loadConfig({ FUNDING_MODE: 'direct_swap' }), /requires Cryptorefills/);
+});
+
 test('disabled Cryptorefills release preserves labelled legacy browsing without authorizing purchase', async () => {
   const { createApp } = await import('../src/application.mjs');
   const { Readable } = await import('node:stream');

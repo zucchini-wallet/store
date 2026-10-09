@@ -1,6 +1,15 @@
-# Cryptorefills partner integration — local, disabled
+# Cryptorefills partner integration — earlier buffered proposal, disabled
+
+As of 9 October 2026 the user selected direct customer-funded swaps instead of
+merchant custody. See [direct payment](direct-payment.md) and the consolidated
+[contract review](cryptorefills-contract-review.md). The buffered implementation
+below is retained for historical orders and does not describe the selected new
+checkout. Current Wrangler configuration selects `direct_swap`, with all payment
+flags disabled. Remaining merchant-buffer inputs listed below are not required
+for the selected direct route.
 
 The authenticated partner guide was reviewed on 8 October 2026:
+
 - https://www.cryptorefills.com/en/account/partner/whitelabel/api
 - https://www.cryptorefills.com/en/account/partner/whitelabel/webhooks
 - https://www.cryptorefills.com/en/api-docs/developers
@@ -60,7 +69,7 @@ the default runtime cannot initiate Cryptorefills purchases. All methods fetch a
   vouchers use `range` with product_value. Never relabel an old 0fiat catalog.
 - `cryptorefillsAdapters.createOrder(order)` calls the documented client and maps
   a reviewed response to `{externalOrderId, orderId, state: WAITING_FOR_PAYMENT,
-  coin: USDC, network: Solana, recipient, amountAtomic, expiresAt}`. Amount is a
+coin: USDC, network: Solana, recipient, amountAtomic, expiresAt}`. Amount is a
   positive six-decimal atomic string; deadline is Unix seconds. The order price
   cannot exceed the authorized provider cost. On retry, the same provider ID,
   destination and amount must remain bound.
@@ -70,7 +79,7 @@ the default runtime cannot initiate Cryptorefills purchases. All methods fetch a
   using the existing Solana verifier, returning exact txid/from/to/amount/token/network.
 - `getOrder(order)` maps a reviewed status to the internal status vocabulary and
   immutable IDs. `COMPLETED` requires `delivery: {beneficiary, brand, country,
-  faceAmount, card}`. `REFUNDED`, expiry, failure and manual review route to refund
+faceAmount, card}`. `REFUNDED`, expiry, failure and manual review route to refund
   review. Unknown states block progression. A provider refund does not issue ZEC.
 
 The `/internal/settlement` endpoint dispatches provider payment actions according
