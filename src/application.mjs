@@ -96,6 +96,7 @@ export function createApp({
       o.state === 'quoted' ? undefined : reconcile(o, o.snapshot, now(), config.confirmations);
     return {
       id: o.id,
+      giftCardProvider: o.giftCardProvider ?? '0fiat',
       brand: o.brand,
       name: o.name,
       iconUrl: o.iconUrl,

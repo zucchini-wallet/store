@@ -90,6 +90,22 @@ email, and requires separate unchecked terms/privacy acceptances. Incoming sourc
 IP comes from the server transport; do not trust arbitrary forwarded headers. The
 Worker's Cloudflare client-IP handling must retain its platform trust boundary.
 
+The [official integration overview](https://www.cryptorefills.com/en/api-docs)
+requires a "Powered by Cryptorefills" label and the provider logo in the purchase
+flow. The storefront now displays both in its footer, product disclosure and
+Cryptorefills order view. Legacy 0fiat order views do not carry that attribution.
+The local SVG uses the official brand-kit geometry in white, with a 24px height and
+at least 24px clear space, following the
+[brand identity guide](https://www.cryptorefills.com/en/press-and-media/brand-identity).
+The public overview does not enumerate the provider-specified purchase stages;
+confirm any additional partner-specific placement before activating purchases.
+
+The header has a visible Connect wallet button on desktop and mobile, even while
+checkout is disabled. It uses `@zucchinifi/dapp-sdk/zcash`, requests only payment
+permission, validates the wallet network, and never submits a payment on connect.
+Wallet disconnect/account events clear local connection state. Payment requires
+a separate checkout action and rechecks the network before requesting approval.
+
 The public `/v5` reference documents wallet_address/coin_amount, a 30-minute window,
 and code availability at Done. The partner guide uses WAITING_FOR_PAYMENT/COMPLETED
 but does not give the full v6 payment/delivery schema. Exact response mappings,

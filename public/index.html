@@ -19,6 +19,8 @@
       <nav>
         <button class="text-button" id="how">How it works</button
         ><button class="text-button" id="orders">My orders</button
+        ><button class="connect-wallet" id="connect-wallet" type="button" disabled>
+          Connect wallet</button
         ><a href="https://zucchinifi.xyz" rel="noopener" class="wallet-link"
           >Get the wallet <span aria-hidden="true">↗</span></a
         >
@@ -111,6 +113,16 @@
     <footer>
       <div class="brand"><img src="/logo.png" alt="" /><span>zucchini store</span></div>
       <p>Good gifts. Private payments.</p>
+      <a
+        class="provider-brand"
+        data-cryptorefills-brand
+        href="https://www.cryptorefills.com"
+        target="_blank"
+        rel="noopener noreferrer"
+        hidden
+        ><span>Powered by Cryptorefills</span
+        ><img src="/cryptorefills-logo.svg" alt="" width="155" height="24"
+      /></a>
       <div>
         <button class="text-button" data-info="privacy">Privacy</button
         ><button class="text-button" data-info="terms">Purchase terms</button
@@ -152,6 +164,16 @@
           </p>
         </div>
         <div id="cryptorefills-disclosure" hidden>
+          <a
+            class="provider-brand"
+            data-cryptorefills-brand
+            href="https://www.cryptorefills.com"
+            target="_blank"
+            rel="noopener noreferrer"
+            hidden
+            ><span>Powered by Cryptorefills</span
+            ><img src="/cryptorefills-logo.svg" alt="" width="155" height="24"
+          /></a>
           <p>
             Sold and delivered by Cryptorefills. Your delivery email and IP address are shared with
             Cryptorefills. Zucchini converts your ZEC to pay your order.
@@ -198,6 +220,17 @@
         <h2 id="checkout-title">A good choice.</h2>
         <p id="checkout-brand" class="muted"></p>
       </div>
+      <a
+        id="checkout-provider"
+        class="provider-brand"
+        data-cryptorefills-brand
+        href="https://www.cryptorefills.com"
+        target="_blank"
+        rel="noopener noreferrer"
+        hidden
+        ><span>Powered by Cryptorefills</span
+        ><img src="/cryptorefills-logo.svg" alt="" width="155" height="24"
+      /></a>
       <div id="review">
         <div class="total">
           <span>You pay</span><strong id="zec-total"></strong

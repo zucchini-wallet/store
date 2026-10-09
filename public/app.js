@@ -32,6 +32,10 @@ let config,
   current,
   client,
   connected = false,
+  walletNetwork,
+  walletBusy = false,
+  walletGeneration = 0,
+  walletListeners = [],
   busy = false,
   poll,
   toastTimer,
@@ -109,6 +113,92 @@ function info(title, paragraphs) {
   );
   show($('info-dialog'));
 }
+const walletReady = (network) => connected && walletNetwork === network;
+function renderWallet() {
+  $('connect-wallet').disabled = !config || walletBusy || busy;
+  $('connect-wallet').textContent = walletBusy
+    ? 'Waiting for wallet…'
+    : connected
+      ? 'Disconnect wallet'
+      : 'Connect wallet';
+  $('connect-wallet').title = connected ? `Zucchini Wallet connected · ${walletNetwork}` : '';
+}
+function resetWallet() {
+  walletGeneration++;
+  for (const unsubscribe of walletListeners) unsubscribe();
+  walletListeners = [];
+  connected = false;
+  walletNetwork = undefined;
+  client = undefined;
+  renderWallet();
+  if (current) renderOrder();
+}
+async function checkWalletNetwork(expectedNetwork) {
+  const activeClient = client,
+    generation = walletGeneration;
+  if (!activeClient) throw Error('Connect your wallet again before continuing.');
+  let network;
+  try {
+    network = await activeClient.network();
+  } catch (e) {
+    if (generation === walletGeneration && activeClient === client) resetWallet();
+    throw e;
+  }
+  if (generation !== walletGeneration || activeClient !== client)
+    throw Error('Wallet connection changed. Connect again before continuing.');
+  if (network !== expectedNetwork) {
+    resetWallet();
+    throw Error(`Switch your wallet to ${expectedNetwork} and connect again.`);
+  }
+  walletNetwork = network;
+}
+async function connectWallet(expectedNetwork) {
+  const provider = discoverZucchiniProvider();
+  if (!provider) {
+    info('Open in a wallet-enabled browser.', [
+      'Install Zucchini Wallet and open this store in a browser where the wallet is available. Unlock the wallet, then choose Connect wallet.',
+      config.checkoutReady
+        ? 'Connecting does not send a payment. You approve payment separately in your wallet.'
+        : 'Connecting does not send a payment. Purchases are currently unavailable.',
+    ]);
+    return;
+  }
+  resetWallet();
+  const generation = walletGeneration;
+  client = createZucchiniClient(provider);
+  walletListeners = ['disconnect', 'accountsChanged'].map((event) => client.on(event, resetWallet));
+  try {
+    const connection = await client.connect({ permissions: ['send_transaction'] });
+    if (generation !== walletGeneration) throw Error('Wallet connection changed. Please retry.');
+    if (!connection.connected) throw Error('Connection was declined.');
+    if (!connection.approvedPermissions?.includes('send_transaction'))
+      throw Error('Allow payment requests in Zucchini Wallet to connect to the store.');
+    await checkWalletNetwork(expectedNetwork);
+    connected = true;
+    toast('Zucchini Wallet connected');
+  } catch (e) {
+    resetWallet();
+    throw e;
+  }
+}
+$('connect-wallet').onclick = async () => {
+  if (!config || walletBusy || busy) return;
+  walletBusy = true;
+  renderWallet();
+  try {
+    if (connected) {
+      await client.disconnect();
+      resetWallet();
+      toast('Wallet disconnected');
+    } else await connectWallet(current?.network ?? config.network);
+  } catch (e) {
+    info('Wallet connection', [e.message]);
+  } finally {
+    walletBusy = false;
+    renderWallet();
+    if (current) renderOrder();
+  }
+};
 const infoContent = {
   privacy: [
     'Privacy, by choice.',
@@ -299,6 +389,7 @@ $('quote-form').onsubmit = async (e) => {
   if (busy) return;
   busy = true;
   $('quote-error').hidden = true;
+  renderWallet();
   $('get-quote').disabled = true;
   $('get-quote').textContent = 'Getting your price…';
   try {
@@ -324,7 +415,6 @@ $('quote-form').onsubmit = async (e) => {
     });
     current = { ...data.order, token: data.token };
     recoverySaved = save({ id: current.id, token: current.token, brand: current.brand });
-    connected = false;
     renderOrder();
     show($('checkout-dialog'));
     startPoll();
@@ -332,6 +422,7 @@ $('quote-form').onsubmit = async (e) => {
     error('quote-error', e);
   } finally {
     busy = false;
+    renderWallet();
     $('get-quote').disabled = !config.checkoutReady;
     $('get-quote').textContent = 'Review Zcash total →';
   }
@@ -362,6 +453,9 @@ document.addEventListener('keydown', (e) => {
 function renderOrder() {
   if (!current) return;
   const o = current;
+  const orderWalletReady = walletReady(o.network);
+  $('checkout-provider').hidden = o.giftCardProvider !== 'cryptorefills';
+  renderWallet();
   $('checkout-error').hidden = true;
   $('checkout-title').textContent =
     o.state === 'delivered'
@@ -401,7 +495,7 @@ function renderOrder() {
   };
   $('order-status').textContent =
     o.state === 'quoted'
-      ? connected
+      ? orderWalletReady
         ? 'Wallet connected. You can now confirm the payment.'
         : 'Connect your wallet first. Payment is a separate step.'
       : o.state === 'delivered'
@@ -422,18 +516,18 @@ function renderOrder() {
                   ? 'Quote cancelled. No payment was requested.'
                   : (labels[receipt?.state] ?? 'Checking your payment.');
   $('checkout-action').hidden = o.state !== 'quoted';
-  $('checkout-action').disabled = busy || now() >= o.quoteExpiresAt;
+  $('checkout-action').disabled = busy || walletBusy || now() >= o.quoteExpiresAt;
   $('checkout-action').textContent = busy
     ? 'Waiting for wallet…'
     : now() >= o.quoteExpiresAt
       ? 'Quote expired'
-      : connected
+      : orderWalletReady
         ? 'Confirm payment in Zucchini'
         : 'Connect Zucchini Wallet';
   for (const [i, li] of [...$('steps').children].entries())
     li.classList.toggle(
       'active',
-      i === (o.state === 'quoted' ? (connected ? 1 : 0) : o.state === 'delivered' ? 2 : 1),
+      i === (o.state === 'quoted' ? (orderWalletReady ? 1 : 0) : o.state === 'delivered' ? 2 : 1),
     );
   $('gift-details').hidden = o.state !== 'delivered';
   if (o.state === 'delivered') renderCard(o.card);
@@ -495,35 +589,23 @@ $('copy-order').onclick = async () => {
     )) || recoverySaved;
 };
 $('checkout-action').onclick = async () => {
-  if (busy || !current || current.state !== 'quoted') return;
+  if (busy || walletBusy || !current || current.state !== 'quoted') return;
   busy = true;
   renderOrder();
   try {
-    if (!connected) {
-      const provider = discoverZucchiniProvider();
-      if (!provider) {
-        info('Open in a wallet-enabled browser.', [
-          'Install Zucchini Wallet, unlock it, and allow this website to connect. Then return to your saved order.',
-        ]);
-        return;
-      }
-      client = createZucchiniClient(provider);
-      const connection = await client.connect({ permissions: ['send_transaction'] });
-      if (!connection.connected) throw Error('Connection was declined.');
-      const network = await client.network();
-      if (network !== current.network)
-        throw Error(`Switch your wallet to ${current.network} and connect again.`);
-      connected = true;
-      toast('Wallet connected');
+    if (!walletReady(current.network)) {
+      await connectWallet(current.network);
       return;
     }
     if (!recoverySaved)
       throw Error('Save your private order link before paying. Browser storage is unavailable.');
+    await checkWalletNetwork(current.network);
     const result = await api(`/api/orders/${current.id}/pay`, {}, current.token);
     current = { ...result.order, token: current.token };
     save({ id: current.id, token: current.token, brand: current.brand });
     renderOrder();
     // A persisted payment request is never automatically replayed after interruption.
+    await checkWalletNetwork(current.network);
     const submission = await client.requestPayment(current.paymentUri);
     const updated = await api(
       `/api/orders/${current.id}/submitted`,
@@ -605,7 +687,6 @@ async function openOrder(id, token) {
   try {
     const data = await api(`/api/orders/${id}`, undefined, token);
     current = { ...data.order, token };
-    connected = false;
     recoverySaved = save({ id, token, brand: current.brand });
     renderOrder();
     show($('checkout-dialog'));
@@ -636,6 +717,10 @@ $('orders').onclick = () => {
 };
 try {
   config = await api('/api/config');
+  renderWallet();
+  for (const brand of document.querySelectorAll('[data-cryptorefills-brand]'))
+    if (brand.id !== 'checkout-provider')
+      brand.hidden = config.giftCardProvider !== 'cryptorefills';
   $('availability').textContent = config.checkoutReady
     ? 'Pay with Zcash'
     : config.catalogPreview

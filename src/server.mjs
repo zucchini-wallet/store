@@ -69,6 +69,7 @@ if (isMain) {
             '.js': 'text/javascript',
             '.css': 'text/css',
             '.png': 'image/png',
+            '.svg': 'image/svg+xml',
             '.woff2': 'font/woff2',
           }[extname(file)] ?? 'application/octet-stream',
         'X-Content-Type-Options': 'nosniff',

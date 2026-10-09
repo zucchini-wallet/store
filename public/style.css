@@ -113,6 +113,30 @@ nav {
 .wallet-link span {
   margin-left: 12px;
 }
+.connect-wallet {
+  background: var(--gold);
+  color: var(--bg);
+  border-radius: 30px;
+  padding: 11px 19px;
+  font-size: 14px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+.provider-brand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 24px;
+  padding: 24px;
+  width: fit-content;
+  margin: 0 auto;
+  color: var(--muted);
+  font-size: 12px;
+}
+.provider-brand img {
+  height: 24px;
+  width: auto;
+}
 .hero {
   display: grid;
   grid-template-columns: 1.05fr 1fr;
@@ -446,6 +470,7 @@ footer {
   padding-top: 25px;
   padding-bottom: 35px;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 20px;
@@ -740,7 +765,12 @@ form input[type='number'] {
     padding-right: 20px;
   }
   .header {
-    height: 80px;
+    min-height: 80px;
+    height: auto;
+    padding-top: 16px;
+    padding-bottom: 16px;
+    flex-wrap: wrap;
+    gap: 16px;
   }
   .brand {
     font-size: 22px;
@@ -758,6 +788,10 @@ form input[type='number'] {
   nav #how,
   .wallet-link {
     display: none;
+  }
+  .connect-wallet {
+    font-size: 12px;
+    padding: 10px 14px;
   }
   .hero {
     display: block;
