@@ -135,6 +135,61 @@ export function createSolanaRpc({
   }
   return {
     readTransferEvidence,
+    async readInvoiceAccount(invoice) {
+      demand(
+        invoice?.coin === 'USDC' &&
+          invoice.network === 'Solana' &&
+          invoice.mint === SOLANA_USDC.mint &&
+          ['owner', 'token_account'].includes(invoice.recipientType),
+        'Unsupported provider account request',
+      );
+      address(invoice.recipient);
+      const genesisHash = await genesis();
+      let owner = invoice.recipient,
+        destinationAccount,
+        accounts;
+      if (invoice.recipientType === 'token_account') {
+        destinationAccount = invoice.recipient;
+        accounts = await request('getAccountInfo', [
+          destinationAccount,
+          {
+            encoding: 'jsonParsed',
+            commitment: 'finalized',
+          },
+        ]);
+        owner = contextValue(accounts)?.data?.parsed?.info?.owner;
+        address(owner);
+      } else {
+        [destinationAccount] = await findAssociatedTokenPda({
+          owner: address(owner),
+          mint: address(SOLANA_USDC.mint),
+          tokenProgram: SOLANA_USDC.program,
+        });
+        accounts = await request('getAccountInfo', [
+          destinationAccount,
+          {
+            encoding: 'jsonParsed',
+            commitment: 'finalized',
+          },
+        ]);
+      }
+      const accountInfo = contextValue(accounts);
+      demand(accountInfo, 'Existing provider USDC account required');
+      const finalizedSlot = await request('getSlot', [{ commitment: 'finalized' }]);
+      demand(
+        safeNumber(finalizedSlot) && accounts.context.slot <= finalizedSlot,
+        'Provider USDC account is not finalized',
+      );
+      return {
+        genesisHash,
+        commitment: 'finalized',
+        owner,
+        destinationAccount,
+        accountInfo: { ...accountInfo, address: destinationAccount },
+        contextSlot: accounts.context.slot,
+        finalizedSlot,
+      };
+    },
     async verifyTopup(plan, txid) {
       await validateSolanaTopupPlan(plan);
       const bundle = await readTransferEvidence(txid);

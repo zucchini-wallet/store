@@ -1,4 +1,4 @@
-# Cryptorefills contract review — 9 October 2026
+# Cryptorefills contract review — 11 October 2026
 
 This record consolidates the authenticated dashboard review, public API reads and
 linked provider guidance. It prevents treating omitted fields as verified API
@@ -12,17 +12,17 @@ in-app browser. The partner is active, with terms accepted on 8 October 2026.
 The public Partner ID was recorded for attribution; no secret value was read.
 One active API key, no partner orders and no webhook endpoints were visible.
 
-| Area            | Verified contract                                                                                                                     | Remaining gap                                                                              |
-| --------------- | ------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| Creation        | POST `/v6/partner/orders`; private partner-key header; stable external order ID makes retries idempotent; customer IP header required | Full success JSON schema and field types                                                   |
-| Product/payment | Request binds brand, country, denomination, customer email; documented USDC/Solana USER_WALLET request                                | Actual invoice amount, precise recipient semantics, expiry and third-party swap acceptance |
-| Polling         | GET `/v6/partner/orders/:id`; completed state required before delivery                                                                | Exact payment-accepted and delivery/code paths, immutable product/buyer evidence           |
-| Cancellation    | DELETE same order path; idempotent cancelled/expired response; even partial payment blocks cancellation                               | Durable cancellation reconciliation in direct coordinator                                  |
-| Late payment    | Dashboard offers order-ID rescan, then support if recovery fails                                                                      | No documented programmatic rescan contract                                                 |
-| Errors          | 401 backup-key failover; 422 identity/product handling; 429 backoff                                                                   | Real partner error fixtures and actionable direct checkout UI                              |
-| Identity        | Inline name/customer resource for identity-required products; hosted KYC separate                                                     | Initial direct route must exclude unsupported identity-required products                   |
-| Webhooks        | Signed POST; deduplicate by webhook-id; ownership proof                                                                               | Signing format, complete event schema and replay/retry details; polling remains sufficient |
-| Key operation   | At least two active privately stored keys; rotation and failover required                                                             | Backup key must be installed by the operator                                               |
+| Area            | Verified contract                                                                                                                     | Remaining gap                                                                                               |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| Creation        | POST `/v6/partner/orders`; private partner-key header; stable external order ID makes retries idempotent; customer IP header required | Node example confirms `wallet_address`, `coin_amount`, `coin`; other success fields/types remain unverified |
+| Product/payment | Request binds brand, country, denomination, customer email; documented USDC/Solana USER_WALLET request                                | Exact amount precision, recipient semantics, v6 expiry and third-party swap acceptance                      |
+| Polling         | GET `/v6/partner/orders/:id`; completed state required before delivery                                                                | Exact payment-accepted and delivery/code paths, immutable product/buyer evidence                            |
+| Cancellation    | DELETE same order path; idempotent cancelled/expired response; even partial payment blocks cancellation                               | Cancellation response documented; GET-based reconciliation mapping still unverified                         |
+| Late payment    | Dashboard offers order-ID rescan, then support if recovery fails                                                                      | No documented programmatic rescan contract                                                                  |
+| Errors          | 401 backup-key failover; 422 identity/product handling; 429 backoff                                                                   | Real partner error fixtures and actionable direct checkout UI                                               |
+| Identity        | Inline name/customer resource for identity-required products; hosted KYC separate                                                     | Initial direct route must exclude unsupported identity-required products                                    |
+| Webhooks        | Signed POST; deduplicate by webhook-id; ownership proof                                                                               | Signing format, complete event schema and replay/retry details; polling remains sufficient                  |
+| Key operation   | At least two active privately stored keys; rotation and failover required                                                             | Backup key must be installed by the operator                                                                |
 
 Sources: [partner API](https://www.cryptorefills.com/en/account/partner/whitelabel/api),
 [orders](https://www.cryptorefills.com/en/account/partner/whitelabel/orders),
@@ -41,7 +41,12 @@ family/brand, with a reviewed strategy for full category coverage.
 The [integration guide](https://www.cryptorefills.com/en/api-docs/developers)
 documents public catalog/price endpoints and v5 validations. Orders must represent
 a genuine intended purchase; don't create unpaid orders just to discover schemas.
-The v5 payment fields and thirty-minute window are not proof of v6 compatibility.
+The authenticated v6 Node creation example independently confirms `order.wallet_address`,
+`order.coin_amount`, and `order.coin`. Its DELETE response comments confirm
+`order_id`, `external_order_id`, and final `order_state: CANCELED`. The public
+v5 polling example uses `order_state: Done` and
+`deliveries[0].deliverable.pin_code`; that is not proof of the v6 completion
+contract. The v5 thirty-minute window is not proof of v6 expiry semantics.
 No validation request was made because it includes real customer data.
 
 Cryptorefills' [Solana troubleshooting guide](https://www.cryptorefills.com/en/insights/solana-payment-common-error)
@@ -73,8 +78,9 @@ customer's bound transparent Zcash address. Zucchini holds neither payment asset
 Request a versioned OpenAPI specification or redacted v6 creation/GET examples
 covering both unpaid and completed gift-card orders, plus these confirmations:
 
-1. Which fields bind invoice coin/network, exact atomic amount, address type and
-   payment/confirmation deadline? Is the Solana deposit a canonical native-USDC
+1. The v6 Node example confirms `wallet_address`, `coin_amount`, and `coin`.
+   What are their types/precision, and which fields establish the network, address
+   type and original payment/confirmation deadline (including idempotent retries)? Is the Solana deposit a canonical native-USDC
    ATA, and can its owner be used by an owner-address withdrawal protocol?
 2. Does USER_WALLET accept an exact-output 1Click payout from a solver, rather than
    a transaction signed by the purchaser? Does it require a memo or payer binding?
@@ -88,13 +94,24 @@ This is a draft request only. No message was sent to Cryptorefills.
 
 ## Code and next test boundary
 
-`FUNDING_MODE=direct_swap` selects the intended route and reports its own blockers.
-It cannot compose the merchant buffer/collector adapters or activate checkout.
-Pure invoice/quote/address tests, read-only catalog tests and HTTP failover tests
-establish local behavior only. Exact-output gateway preview remains distinct from
-durable execution. Direct coordinator, renewable gateway sessions, wallet approval
-expiry and verified response mappings must be completed before a capped real-funds
-test. Funded acceptance precedes public activation, not local contract development.
+`FUNDING_MODE=direct_swap` selects the intended route. The durable coordinator,
+HTTP checkout flow, stable Ed25519 gateway installation sessions, exact-output
+quote adapter, finalized invoice-account/payout verification, cancellation
+recovery, and explicit quote-then-pay UI are implemented and tested with synthetic
+contracts. The SDK exposes typed address access and passes a required approval
+expiry; the scoped wallet change enforces that expiry before signing.
+
+Gateway execution source now reserves an immutable installation/client UUID before
+provider I/O and exposes recovery of the original quote. Both execution gates remain
+false. The reviewed source and database migration must be deployed together before
+that route can be enabled. The store's runtime requires reviewed source functions
+for v6 pricing, invoice, status/delivery and cancellation mapping. Those functions
+are still absent; no environment flag can bypass this readiness block.
+
+Local tests establish rejection and recovery behavior, not upstream compatibility.
+A capped real-funds acceptance requires the provider confirmations above, the
+backup key, deployed gateway route, updated wallet, and explicit buyer approval.
+No live Cryptorefills order or swap has been created.
 
 Add the operator-created backup key without putting it in Wrangler vars:
 

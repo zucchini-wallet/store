@@ -1,6 +1,57 @@
 # Store operations
 
-## Production setup
+## Direct Cryptorefills setup
+
+The selected route is `FUNDING_MODE=direct_swap`; ZEC goes to the per-order swap
+deposit and USDC goes directly to CR. Keep checkout/fulfillment false until
+[the provider review](cryptorefills-contract-review.md) and scoped gateway/wallet
+rollouts are complete. The setup below does not require a merchant receiver,
+viewing key, ZEC collector, USDC buffer or operator signing wallet.
+
+Retain `ADMIN_TOKEN`, `DATA_ENCRYPTION_KEY` and the existing SQLite Durable Object.
+Configure private `CRYPTOREFILLS_PARTNER_KEY`, a distinct
+`CRYPTOREFILLS_BACKUP_PARTNER_KEY`, and the stable `GATEWAY_INSTALLATION_SEED`.
+The installation seed identifies the backend to the gateway; preserve it across
+rollouts so its orders remain recoverable. Never copy an extension session/seed.
+Public vars select the gateway origin/app ID, Solana mainnet RPC, native-USDC asset
+and approval/settlement windows. Runtime readiness checks these independently.
+
+```sh
+npm exec wrangler -- secret put CRYPTOREFILLS_BACKUP_PARTNER_KEY
+npm run check
+npm test
+npm run build
+npm exec wrangler -- deploy --dry-run
+npm exec wrangler -- deploy
+GIFT_CARD_PROVIDER=cryptorefills node scripts/catalog-sync.mjs \
+  --selection /absolute/private/selected-country-families.json
+GIFT_CARD_PROVIDER=cryptorefills node scripts/catalog-publish.mjs \
+  https://store.zucchinifi.xyz /absolute/private/store-runtime.json \
+  /absolute/private/catalog.json --preview
+```
+
+The selection file is an array of `{ "countryCode": "US", "familyName": "Steam" }`
+objects, limited to 50 families. CR publication requires an explicit preview and
+retains namespaced UUIDs. Daily refresh performs read-only availability/product
+calls for those selected families, with an atomic replacement only after the
+complete response is validated. No default USDC-MATIC price authorizes Solana
+checkout. A failed refresh preserves the active version.
+
+The private `/internal/health` reports source readiness and blockers. It does not
+claim live partner connectivity from a stored secret. `/internal/solana-height`
+provides a read-only configured RPC check. `/internal/direct` supports `poll`,
+`recover_invoice`, `recover_swap` and `recover_cancel` under the administration
+token. Recover invoice creation only with the original idempotency reference;
+recover swap/cancellation using the original order, never a replacement send.
+
+Deploy gateway migration 0017 before its matching Worker/container code, keeping
+both exact-output execution flags false during review. Install the updated wallet
+expiry build before the capped buyer test. Confirm original v6 invoice deadlines,
+owner/ATA payout semantics, third-party payment acceptance and customer USDC refund
+recovery before enabling a payable route. The buyer explicitly approves the funded
+test; automated tests and deployment do not create provider orders or move funds.
+
+## Historical 0fiat production setup
 
 1. Create a dedicated receiving account in an existing Zucchini wallet. Keep its
    spending key in the wallet. Export its incoming viewing key to a private file.

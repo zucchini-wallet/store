@@ -6,6 +6,7 @@ import {
   normalizeSolanaUsdcPaymentMethod,
   normalizeCryptorefillsPrice,
   createCryptorefillsCatalogClient,
+  matchCryptorefillsSelection,
 } from '../src/cryptorefills-catalog.mjs';
 
 // Synthetic fixtures composed from fields observed in public GETs on 9 October 2026:
@@ -18,6 +19,8 @@ import {
 // The fixed Steam and flexible Airbnb product IDs are real sample UUIDs. The combined
 // group below is synthetic, not a complete response snapshot. Coin amounts/thresholds
 // are historical samples, never settlement quotes. Unfiltered US products GET was 400.
+// Fresh GETs on 11 October also confirmed delivery_type='by_email' and digital/physical
+// product_type. Product UUIDs changed since 9 October; repeat GETs today were stable.
 const brandId = 'e2ca35ea-1bef-43f2-a12f-12d8ced083c7';
 const fixedId = 'e20303ba-f8b0-461d-9c78-44f36cbc40b7';
 const rangeId = 'a8884553-a076-4723-81a9-e8d7c4f7e636';
@@ -37,6 +40,8 @@ const fixed = () => ({
   coin: 'USDC',
   coin_amount: '11.26',
   payment_method: 'USDC-MATIC',
+  delivery_type: 'by_email',
+  product_type: 'digital',
   face_value: { currency_code: 'USD', amount: { type: 'fixed', price: '10' } },
 });
 const range = () => ({
@@ -44,6 +49,8 @@ const range = () => ({
   is_dynamic: true,
   coin: 'USDC',
   payment_method: 'USDC-MATIC',
+  delivery_type: 'by_email',
+  product_type: 'physical',
   range: { min: 50, max: 500, currency: 'USD', step_size: 1, default: '500.0' },
   face_value: { currency_code: 'USD', amount: { type: 'range', min: '50.00', max: '500.00' } },
 });
@@ -99,6 +106,14 @@ test('preserves provider UUIDs and exact fixed/range denominations without settl
   assert.equal(records[1].denominationMode, 'FLEXIBLE');
   assert.deepEqual(records[1].range, { min: '50', max: '500', step: '1' });
   assert.ok(records.every((record) => !('voucherId' in record) && !('coinAmount' in record)));
+  assert.ok(
+    records.every(
+      (record) =>
+        record.checkoutEligible === false &&
+        record.identityRequirementsVerified === false &&
+        record.networkVerified === false,
+    ),
+  );
   const raw = products();
   raw[0].is_out_of_stock = true;
   assert.equal(normalizeCryptorefillsCatalog(raw, 'US')[0].available, false);
@@ -144,6 +159,40 @@ test('normalizes every gift-card group without assuming digital product_type', (
   );
   assert.equal(records[1].brandName, 'Airbnb');
   assert.equal(records[1].denominationMode, 'FLEXIBLE');
+});
+
+test('excludes unsupported delivery and emoney product types from gift-card previews', () => {
+  for (const change of [
+    (product) => {
+      product.delivery_type = 'sms';
+    },
+    (product) => {
+      delete product.delivery_type;
+    },
+    (product) => {
+      product.product_type = 'emoney';
+    },
+  ]) {
+    const raw = products();
+    raw[0].products = [fixed()];
+    change(raw[0].products[0]);
+    assert.deepEqual(normalizeCryptorefillsCatalog(raw, 'US'), []);
+  }
+});
+
+test('fresh selection checks reject missing UUIDs and changed product identity or stock', () => {
+  const current = normalizeCryptorefillsCatalog(products(), 'US');
+  const selected = current[0];
+  assert.equal(matchCryptorefillsSelection(current, selected).providerProductId, fixedId);
+  assert.throws(() => matchCryptorefillsSelection(current.slice(1), selected), /unavailable/);
+  assert.throws(
+    () => matchCryptorefillsSelection([{ ...selected, available: false }], selected),
+    /unavailable/,
+  );
+  assert.throws(
+    () => matchCryptorefillsSelection([{ ...selected, brandName: 'Other brand' }], selected),
+    /changed/,
+  );
 });
 
 test('brand catalog uses exact API brand IDs/names and enforces the requested country', () => {

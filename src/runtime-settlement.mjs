@@ -2,6 +2,8 @@ import { createCryptorefillsProvider } from './cryptorefills-provider.mjs';
 import { createGatewayAdapter } from './gateway-adapter.mjs';
 import { createSolanaRpc } from './solana-rpc.mjs';
 import { SOLANA_USDC, verifySolanaTransferEvidence } from './solana-settlement.mjs';
+import { createGatewaySession } from './gateway-session.mjs';
+import { createDirectGatewayAdapter } from './direct-gateway-adapter.mjs';
 
 // Construct transports only; this function never calls a service or submits funds.
 // Reviewed response mappings are source functions, not environment-provided code.
@@ -20,18 +22,78 @@ export function createRuntimeSettlement({ config, env, fetcher = fetch, mappings
     const rpc = solanaConfigured
       ? createSolanaRpc({ url: config.solanaRpcUrl, fetcher })
       : undefined;
+    const gatewayConfigured = Boolean(
+      config.gatewayOrigin && config.gatewayAppId && env.GATEWAY_INSTALLATION_SEED,
+    );
+    const schemaConfigured =
+      mappings?.contract === 'cryptorefills-partner-v6-reviewed' &&
+      ['directPrice', 'directInvoice', 'directOrder', 'directCancel'].every(
+        (name) => typeof mappings[name] === 'function',
+      );
+    const rawProvider = keyConfigured
+      ? createCryptorefillsProvider(
+          {
+            key: env.CRYPTOREFILLS_PARTNER_KEY,
+            ...(backupKeyConfigured ? { backupKey: env.CRYPTOREFILLS_BACKUP_PARTNER_KEY } : {}),
+          },
+          { fetcher },
+        )
+      : undefined;
+    const session = gatewayConfigured
+      ? createGatewaySession({
+          origin: config.gatewayOrigin,
+          installationSeed: env.GATEWAY_INSTALLATION_SEED,
+          appId: config.gatewayAppId,
+          fetcher,
+        })
+      : undefined;
+    const gateway = session
+      ? createDirectGatewayAdapter({
+          origin: config.gatewayOrigin,
+          session,
+          slippageBps: config.slippageBps,
+          fetcher,
+        })
+      : undefined;
+    const directAdapters =
+      rawProvider && schemaConfigured && rpc && gateway
+        ? {
+            createInvoice: async (order) =>
+              mappings.directInvoice(await rawProvider.createOrder(order), order),
+            getInvoice: async (order) =>
+              mappings.directOrder(
+                await rawProvider.getOrder(order.direct.providerOrderId, order.customerIp),
+                order,
+              ),
+            cancelInvoice: async (order) =>
+              mappings.directCancel(
+                await rawProvider.cancelOrder(order.direct.providerOrderId, order.customerIp),
+                order,
+              ),
+            readInvoiceAccount: (invoice) => rpc.readInvoiceAccount(invoice),
+            ...gateway,
+            async verifyPayout(binding, txid) {
+              return verifySolanaTransferEvidence(await rpc.readTransferEvidence(txid), {
+                txid,
+                to: binding.recipientAddress,
+                amountAtomic: binding.amountOutAtomic,
+                destinationAccount: binding.destinationAccount,
+              });
+            },
+          }
+        : undefined;
     const blockers = [];
     if (!keyConfigured) blockers.push('cryptorefills_partner_key');
     if (!backupKeyConfigured) blockers.push('cryptorefills_backup_partner_key');
     if (!config.cryptorefillsPartnerId) blockers.push('cryptorefills_public_partner_id');
     if (!solanaConfigured) blockers.push('solana_invoice_account_rpc');
+    if (!schemaConfigured) blockers.push('reviewed_v6_invoice_price_and_delivery_mappings');
+    if (!gatewayConfigured) blockers.push('gateway_installation_seed_origin_and_allowlisted_app');
     blockers.push(
-      'reviewed_v6_invoice_price_and_delivery_mappings',
-      'renewable_gateway_installation_session',
-      'gateway_exact_output_execution_and_recovery',
+      'gateway_exact_output_route_review_and_deployment',
       'swap_recipient_matches_invoice_token_account',
-      'customer_refund_and_quote_expiry_wallet_flow',
-      'direct_checkout_state_machine',
+      'quote_deadline_wallet_release',
+      'cryptorefills_direct_swap_and_customer_refund_confirmation',
       'funded_acceptance',
     );
     return {
@@ -40,11 +102,21 @@ export function createRuntimeSettlement({ config, env, fetcher = fetch, mappings
         keyConfigured,
         backupKeyConfigured,
         solanaConfigured,
-        gatewayConfigured: false,
-        schemaConfigured: false,
+        gatewayConfigured,
+        schemaConfigured,
+        coordinatorImplemented: true,
+        readyForFundsTest: false,
         checkoutActivatable: false,
         blockers,
       }),
+      directAdapters,
+      provider:
+        rawProvider && schemaConfigured
+          ? {
+              quoteProduct: (voucher, amount, context) =>
+                mappings.directPrice({ voucher, amount, context, fetcher }),
+            }
+          : undefined,
       getSolanaBlockHeight: rpc ? () => rpc.getCurrentBlockHeight() : undefined,
     };
   }

@@ -7,7 +7,14 @@ import { createEncryptedStore } from '../src/storage-core.mjs';
 import { createProvider } from '../src/provider.mjs';
 import { loadConfig, secureEqual } from '../src/config.mjs';
 import { cleanCatalog } from '../src/catalog.mjs';
+import {
+  catalogRecordKey,
+  cleanCatalogDocument,
+  validateCatalogPublication,
+} from '../src/catalog.mjs';
 import { createFulfillment } from '../src/fulfillment.mjs';
+import { createCryptorefillsCatalogClient } from '../src/cryptorefills-catalog.mjs';
+import { refreshSelectedCryptorefillsCatalog } from '../src/catalog-refresh.mjs';
 const fail = () =>
   Response.json(
     { error: 'The store is temporarily unavailable. Please try again.' },
@@ -24,6 +31,20 @@ export class Store extends DurableObject {
       sql.exec(
         'CREATE TABLE IF NOT EXISTS orders(id TEXT PRIMARY KEY,token TEXT NOT NULL,data TEXT NOT NULL); CREATE TABLE IF NOT EXISTS receipts(id TEXT PRIMARY KEY,order_id TEXT NOT NULL); CREATE TABLE IF NOT EXISTS catalog(version TEXT NOT NULL,id INTEGER NOT NULL,data TEXT NOT NULL,PRIMARY KEY(version,id)); CREATE TABLE IF NOT EXISTS metadata(key TEXT PRIMARY KEY,value TEXT NOT NULL);',
       );
+      // Preserve cached data while allowing provider-scoped UUID/string identities.
+      const idColumn = sql
+        .exec('PRAGMA table_info(catalog)')
+        .toArray()
+        .find((r) => r.name === 'id');
+      if (idColumn?.type !== 'TEXT')
+        ctx.storage.transactionSync(() => {
+          sql.exec(
+            'CREATE TABLE catalog_strings(version TEXT NOT NULL,id TEXT NOT NULL,data TEXT NOT NULL,PRIMARY KEY(version,id))',
+          );
+          sql.exec('INSERT INTO catalog_strings SELECT version,CAST(id AS TEXT),data FROM catalog');
+          sql.exec('DROP TABLE catalog');
+          sql.exec('ALTER TABLE catalog_strings RENAME TO catalog');
+        });
       this.config = loadConfig({
         ...env,
         OFIAT_ENV_FILE: env.OFIAT_API_KEY ? 'worker-secret' : undefined,
@@ -68,15 +89,20 @@ export class Store extends DurableObject {
       .exec('SELECT value FROM metadata WHERE key=?', 'catalog')
       .toArray()[0];
     if (!meta) return;
-    const { version, fetchedAt, provider } = JSON.parse(meta.value);
-    this.catalog.provider = catalogProvider(provider);
-    this.catalog.vouchers = cleanCatalog(
-      this.ctx.storage.sql
+    const { version, fetchedAt, provider, directPrice, selectionScope, previewOnly } = JSON.parse(
+      meta.value,
+    );
+    const document = cleanCatalogDocument({
+      fetchedAt,
+      provider,
+      ...(directPrice ? { directPrice } : {}),
+      ...(selectionScope ? { selectionScope } : {}),
+      vouchers: this.ctx.storage.sql
         .exec('SELECT data FROM catalog WHERE version=? ORDER BY id', version)
         .toArray()
         .map((r) => JSON.parse(r.data)),
-    );
-    this.catalog.fetchedAt = fetchedAt;
+    });
+    Object.assign(this.catalog, document, { previewOnly: previewOnly === true });
   }
   async fetch(request) {
     const path = new URL(request.url).pathname;
@@ -99,14 +125,14 @@ export class Store extends DurableObject {
       if (!/^[a-f0-9-]{36}$/.test(b.version) || !Number.isFinite(Date.parse(b.fetchedAt)))
         return Response.json({ error: 'Invalid catalog version' }, { status: 400 });
       if (b.records) {
-        const records = cleanCatalog(b.records);
+        const records = cleanCatalog(b.records, provider);
         if (records.length > 200) throw Error('Too many records');
         this.ctx.storage.transactionSync(() => {
           for (const v of records)
             this.ctx.storage.sql.exec(
               'INSERT OR REPLACE INTO catalog VALUES(?,?,?)',
               b.version,
-              v.voucherId,
+              catalogRecordKey(v, provider),
               JSON.stringify(v),
             );
         });
@@ -117,11 +143,31 @@ export class Store extends DurableObject {
           .toArray()[0].n;
         if (!Number.isSafeInteger(b.count) || count !== b.count || count < 1 || count > 50000)
           throw Error('Incomplete catalog');
+        const document = validateCatalogPublication(
+          {
+            provider,
+            fetchedAt: b.fetchedAt,
+            ...(b.directPrice ? { directPrice: b.directPrice } : {}),
+            ...(b.selectionScope ? { selectionScope: b.selectionScope } : {}),
+            vouchers: this.ctx.storage.sql
+              .exec('SELECT data FROM catalog WHERE version=?', b.version)
+              .toArray()
+              .map((r) => JSON.parse(r.data)),
+          },
+          { provider: this.config.giftCardProvider, previewOnly: b.previewOnly },
+        );
         this.ctx.storage.transactionSync(() => {
           this.ctx.storage.sql.exec(
             'INSERT OR REPLACE INTO metadata VALUES(?,?)',
             'catalog',
-            JSON.stringify({ version: b.version, fetchedAt: b.fetchedAt, provider }),
+            JSON.stringify({
+              version: b.version,
+              fetchedAt: b.fetchedAt,
+              provider,
+              previewOnly: b.previewOnly === true,
+              directPrice: document.directPrice,
+              selectionScope: document.selectionScope,
+            }),
           );
           this.ctx.storage.sql.exec('DELETE FROM catalog WHERE version<>?', b.version);
         });
@@ -171,9 +217,35 @@ export class Store extends DurableObject {
     return new Response(content, { status, headers });
   }
   async syncCatalog() {
-    if (!this.provider) return;
     if (this.catalog.fetchedAt && Date.now() - Date.parse(this.catalog.fetchedAt) < 20 * 3600000)
       return;
+    if (this.config.giftCardProvider === 'cryptorefills') {
+      if (this.catalog.provider !== 'cryptorefills') return;
+      const document = await refreshSelectedCryptorefillsCatalog(this.catalog, {
+        client: createCryptorefillsCatalogClient({
+          applicationId: this.config.cryptorefillsPartnerId,
+        }),
+      });
+      const version = crypto.randomUUID();
+      this.ctx.storage.transactionSync(() => {
+        for (const v of document.vouchers)
+          this.ctx.storage.sql.exec(
+            'INSERT INTO catalog VALUES(?,?,?)',
+            version,
+            catalogRecordKey(v, 'cryptorefills'),
+            JSON.stringify(v),
+          );
+        this.ctx.storage.sql.exec(
+          'INSERT OR REPLACE INTO metadata VALUES(?,?)',
+          'catalog',
+          JSON.stringify({ ...document, vouchers: undefined, version, previewOnly: true }),
+        );
+        this.ctx.storage.sql.exec('DELETE FROM catalog WHERE version<>?', version);
+      });
+      this.reloadCatalog();
+      return;
+    }
+    if (!this.provider) return;
     const vouchers = [];
     for (let offset = 0; offset < 50000; offset += 200) {
       const result = await this.provider.request('/vouchers?limit=200&offset=' + offset);
@@ -191,7 +263,7 @@ export class Store extends DurableObject {
         this.ctx.storage.sql.exec(
           'INSERT INTO catalog VALUES(?,?,?)',
           version,
-          v.voucherId,
+          catalogRecordKey(v, '0fiat'),
           JSON.stringify(v),
         );
       this.ctx.storage.sql.exec(
@@ -215,6 +287,11 @@ export class Store extends DurableObject {
             (o) =>
               (o.fundingMode === 'shielded_buffer' &&
                 !['reply_confirmed', 'conversion_review'].includes(o.settlement?.state)) ||
+              (o.fundingMode === 'direct_swap' &&
+                o.paymentStartedAt &&
+                !['delivered', 'cancelled', 'refund_review', 'support_required'].includes(
+                  o.state,
+                )) ||
               ['payment_pending', 'fulfilling'].includes(o.state) ||
               (o.state === 'delivered' && o.emailOptIn && !o.emailSent && !o.emailNeedsReview),
           )
@@ -244,7 +321,7 @@ export default {
     const headers = new Headers(response.headers);
     headers.set(
       'Content-Security-Policy',
-      "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' https://0fiat.com https://cdn.cryptorefills.com; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+      "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' https://0fiat.com https://cdn.cryptorefills.com https://cryptorefills.s3-eu-west-1.amazonaws.com; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
     );
     headers.set('Referrer-Policy', 'no-referrer');
     headers.set('X-Content-Type-Options', 'nosniff');

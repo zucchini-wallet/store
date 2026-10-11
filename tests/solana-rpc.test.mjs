@@ -1,7 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { base58, base64 } from '@scure/base';
-import { getTransactionDecoder, getCompiledTransactionMessageDecoder } from '@solana/kit';
+import { address, getTransactionDecoder, getCompiledTransactionMessageDecoder } from '@solana/kit';
+import { findAssociatedTokenPda } from '@solana-program/token';
+import { resolveDirectInvoiceDestination } from '../src/direct-payment.mjs';
 import { createSolanaRpc } from '../src/solana-rpc.mjs';
 import { SOLANA_USDC, validateSolanaTopupPlan } from '../src/solana-settlement.mjs';
 
@@ -32,6 +34,32 @@ const account = (owner, amount) => ({
       },
     },
   },
+});
+test('invoice RPC resolves finalized canonical USDC accounts for owners and token-account invoices', async () => {
+  const [ata] = await findAssociatedTokenPda({
+    owner: address(to),
+    mint: address(SOLANA_USDC.mint),
+    tokenProgram: SOLANA_USDC.program,
+  });
+  for (const recipientType of ['owner', 'token_account']) {
+    const invoice = {
+      coin: 'USDC',
+      network: 'Solana',
+      mint: SOLANA_USDC.mint,
+      recipientType,
+      recipient: recipientType === 'owner' ? to : ata,
+    };
+    const { rpc, calls } = mock({ getAccountInfo: context(account(to, '0')) });
+    const evidence = await rpc.readInvoiceAccount(invoice);
+    assert.equal((await resolveDirectInvoiceDestination(invoice, evidence)).owner, to);
+    assert.equal(evidence.destinationAccount, ata);
+    assert.equal(calls[1].params[0], ata);
+    assert.equal(calls[1].params[1].commitment, 'finalized');
+    await assert.rejects(
+      mock({ getAccountInfo: context(account(to, '0'), 102) }).rpc.readInvoiceAccount(invoice),
+    );
+    await assert.rejects(mock({ getAccountInfo: context(null) }).rpc.readInvoiceAccount(invoice));
+  }
 });
 const responses = () => ({
   getGenesisHash: SOLANA_USDC.genesisHash,

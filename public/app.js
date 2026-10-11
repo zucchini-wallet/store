@@ -32,6 +32,7 @@ let config,
   current,
   client,
   connected = false,
+  addressPermission = false,
   walletNetwork,
   walletBusy = false,
   walletGeneration = 0,
@@ -128,6 +129,7 @@ function resetWallet() {
   for (const unsubscribe of walletListeners) unsubscribe();
   walletListeners = [];
   connected = false;
+  addressPermission = false;
   walletNetwork = undefined;
   client = undefined;
   renderWallet();
@@ -168,11 +170,15 @@ async function connectWallet(expectedNetwork) {
   client = createZucchiniClient(provider);
   walletListeners = ['disconnect', 'accountsChanged'].map((event) => client.on(event, resetWallet));
   try {
-    const connection = await client.connect({ permissions: ['send_transaction'] });
+    const direct = config.fundingMode === 'direct_swap';
+    const connection = await client.connect({
+      permissions: direct ? ['send_transaction', 'view_addresses'] : ['send_transaction'],
+    });
     if (generation !== walletGeneration) throw Error('Wallet connection changed. Please retry.');
     if (!connection.connected) throw Error('Connection was declined.');
     if (!connection.approvedPermissions?.includes('send_transaction'))
       throw Error('Allow payment requests in Zucchini Wallet to connect to the store.');
+    addressPermission = connection.approvedPermissions?.includes('view_addresses') === true;
     await checkWalletNetwork(expectedNetwork);
     connected = true;
     toast('Zucchini Wallet connected');
@@ -299,6 +305,12 @@ function renderProducts() {
       img.alt = v.brandName;
       img.loading = 'lazy';
       if (/^https:\/\/0fiat\.com\//.test(v.iconUrl)) img.src = v.iconUrl;
+      else if (
+        /^https:\/\/(?:cdn\.cryptorefills\.com|cryptorefills\.s3-eu-west-1\.amazonaws\.com)\//.test(
+          v.iconUrl,
+        )
+      )
+        img.src = v.iconUrl;
       img.onerror = () => {
         const fallback = document.createElement('span');
         fallback.className = 'fallback';
@@ -340,11 +352,14 @@ function openProduct(v) {
   const variants = v.variants ?? [v];
   $('variant-label').hidden = variants.length < 2;
   $('variant').replaceChildren(
-    ...variants.map((a) => new Option(a.name + ' · ' + a.currency, a.voucherId)),
+    ...variants.map(
+      (a) =>
+        new Option(a.name + ' · ' + cash(a.minAmount, a.currency), a.id ?? String(a.voucherId)),
+    ),
   );
-  $('variant').value = v.voucherId;
+  $('variant').value = v.id ?? String(v.voucherId);
   $('variant').onchange = () => {
-    const a = variants.find((x) => x.voucherId === Number($('variant').value));
+    const a = variants.find((x) => (x.id ?? String(x.voucherId)) === $('variant').value);
     updateProduct(a);
   };
   updateProduct(v);
@@ -364,6 +379,7 @@ function updateProduct(v) {
   );
   $('flexible-amount').min = v.minAmount;
   $('flexible-amount').max = v.maxAmount;
+  $('flexible-amount').step = v.stepAmount ?? '0.01';
   $('flexible-amount').value = v.minAmount;
   $('amount-hint').textContent =
     `Redeemable in ${countryName(v.countryCode)}. ${v.denominationMode === 'FIXED' ? 'Choose a listed value.' : `Between ${cash(v.minAmount, v.currency)} and ${cash(v.maxAmount, v.currency)}.`}`;
@@ -371,6 +387,9 @@ function updateProduct(v) {
   $('disabled-message').hidden = config.checkoutReady;
   $('email-opt').disabled = !config.emailAvailable;
   $('email-opt').checked = false;
+  $('direct-payment-inputs').hidden = config.fundingMode !== 'direct_swap';
+  $('max-zec').required = config.fundingMode === 'direct_swap';
+  $('direct-refund-address').required = config.fundingMode === 'direct_swap';
   const cr = config.giftCardProvider === 'cryptorefills';
   $('email').hidden = !cr;
   $('email').required = cr;
@@ -389,6 +408,31 @@ $('email-opt').onchange = () => {
   $('email').hidden = !required && !$('email-opt').checked;
   $('email').required = required || $('email-opt').checked;
 };
+$('use-wallet-refund').onclick = async () => {
+  try {
+    if (!walletReady(config.network) || !addressPermission)
+      throw Error(
+        'Connect your wallet and approve address access first. You can also paste your own refund address.',
+      );
+    await checkWalletNetwork(config.network);
+    const active = client,
+      generation = walletGeneration;
+    const addresses = await active.getAddresses();
+    if (client !== active || generation !== walletGeneration)
+      throw Error('Wallet connection changed.');
+    $('direct-refund-address').value = addresses.transparent;
+  } catch (e) {
+    error('quote-error', e);
+  }
+};
+function zecCap(value) {
+  if (!/^(0|[1-9][0-9]{0,7})(?:\.[0-9]{1,8})?$/.test(value))
+    throw Error('Enter a maximum ZEC payment with up to 8 decimal places.');
+  const [whole, fraction = ''] = value.split('.');
+  const atomic = BigInt(whole) * 100000000n + BigInt(fraction.padEnd(8, '0'));
+  if (atomic <= 0n || atomic > 2100000000000000n) throw Error('Enter a valid maximum ZEC payment.');
+  return String(atomic);
+}
 $('quote-form').onsubmit = async (e) => {
   e.preventDefault();
   if (busy) return;
@@ -399,13 +443,19 @@ $('quote-form').onsubmit = async (e) => {
   $('get-quote').textContent = 'Getting your price…';
   try {
     const data = await api('/api/orders', {
-      voucherId: selected.voucherId,
+      ...(selected.id ? { id: selected.id } : { voucherId: selected.voucherId }),
       amount:
         selected.denominationMode === 'FIXED'
           ? $('fixed-amount').value
           : $('flexible-amount').value,
       ...(config.fundingMode === 'shielded_buffer'
         ? { replyAddress: $('reply-address').value.trim() }
+        : {}),
+      ...(config.fundingMode === 'direct_swap'
+        ? {
+            maxInputZatoshis: zecCap($('max-zec').value.trim()),
+            refundAddress: $('direct-refund-address').value.trim(),
+          }
         : {}),
       emailOptIn: $('email-opt').checked,
       ...(config.giftCardProvider === 'cryptorefills'
@@ -469,8 +519,9 @@ function renderOrder() {
         ? 'Getting your card.'
         : 'A good choice.';
   $('checkout-brand').textContent = o.brand;
-  $('zec-total').textContent =
-    `${(Number(o.amountZatoshis) / 1e8).toLocaleString('en', { maximumFractionDigits: 8 })} ZEC`;
+  $('zec-total').textContent = o.amountZatoshis
+    ? `${(Number(o.amountZatoshis) / 1e8).toLocaleString('en', { maximumFractionDigits: 8 })} ZEC`
+    : `Up to ${(Number(o.maxInputZatoshis) / 1e8).toLocaleString('en', { maximumFractionDigits: 8 })} ZEC`;
   $('usd-total').textContent = cash(o.totalUsd, 'USD');
   $('face-total').textContent = cash(o.faceAmount, o.currency);
   $('redeem-country').textContent = countryName(o.country);
@@ -481,8 +532,9 @@ function renderOrder() {
   $('order-reference').textContent = 'Order ' + o.id;
   $('cancel-order').hidden = o.state !== 'quoted';
   $('refund-order').hidden =
-    !['refund_review', 'support_required'].includes(o.state) &&
-    !['underpaid', 'overpaid', 'late_payment', 'reorg_review'].includes(o.receipt?.state);
+    o.fundingMode === 'direct_swap' ||
+    (!['refund_review', 'support_required'].includes(o.state) &&
+      !['underpaid', 'overpaid', 'late_payment', 'reorg_review'].includes(o.receipt?.state));
   $('review').hidden = ['delivered', 'fulfilling'].includes(o.state);
   const receipt = o.receipt;
   const labels = {
@@ -527,8 +579,38 @@ function renderOrder() {
     : now() >= o.quoteExpiresAt
       ? 'Quote expired'
       : orderWalletReady
-        ? 'Confirm payment in Zucchini'
+        ? o.fundingMode === 'direct_swap' && o.directState === 'draft'
+          ? 'Request invoice and exact ZEC quote'
+          : 'Confirm payment in Zucchini'
         : 'Connect Zucchini Wallet';
+  if (o.fundingMode === 'direct_swap') {
+    const messages = {
+      draft:
+        'Review the USDC total and your ZEC cap. Requesting a quote creates your Cryptorefills purchase invoice.',
+      quote_ready:
+        'Review this exact ZEC amount. The swap pays USDC directly to Cryptorefills; Zucchini does not receive these funds.',
+      invoice_requesting: 'Preparing your purchase invoice.',
+      invoice_ready: 'Preparing your exact ZEC quote.',
+      swap_requesting: 'Preparing your exact ZEC quote.',
+      payment_requested: 'Payment was requested. Check wallet Activity before trying to pay again.',
+      provider_payment_confirmed:
+        'USDC payment finalized. Waiting for Cryptorefills to confirm delivery.',
+      delivered:
+        'Cryptorefills delivered your card. Check your delivery email and keep the card details private.',
+      swap_refund_review:
+        'Check your transparent Zcash refund address and contact support about the swap.',
+      provider_refund_review:
+        'Check Cryptorefills email for any eligible USDC refund. It is not automatically converted back to ZEC.',
+      invoice_unknown:
+        'The invoice request needs recovery. No replacement payment will be requested.',
+      swap_unknown:
+        'The swap quote needs recovery. Check this saved order before starting another purchase.',
+      verification_review:
+        'Payment verification needs review. Contact support with this order reference.',
+      cancelled: 'Purchase cancelled before payment was requested.',
+    };
+    $('order-status').textContent = messages[o.directState] ?? 'Checking your direct payment.';
+  }
   for (const [i, li] of [...$('steps').children].entries())
     li.classList.toggle(
       'active',
@@ -595,33 +677,81 @@ $('copy-order').onclick = async () => {
 };
 $('checkout-action').onclick = async () => {
   if (busy || walletBusy || !current || current.state !== 'quoted') return;
+  const reviewed = {
+    id: current.id,
+    token: current.token,
+    network: current.network,
+    fundingMode: current.fundingMode,
+    directState: current.directState,
+    amountZatoshis: current.amountZatoshis,
+  };
+  const sameOrder = () => current?.id === reviewed.id && current?.token === reviewed.token;
+  const stillReviewing = () => {
+    if (!sameOrder() || !$('checkout-dialog').open)
+      throw Error('Order review changed. Check your saved order before continuing.');
+  };
   busy = true;
   renderOrder();
   try {
-    if (!walletReady(current.network)) {
-      await connectWallet(current.network);
+    if (!walletReady(reviewed.network)) {
+      await connectWallet(reviewed.network);
       return;
     }
     if (!recoverySaved)
       throw Error('Save your private order link before paying. Browser storage is unavailable.');
-    await checkWalletNetwork(current.network);
-    const result = await api(`/api/orders/${current.id}/pay`, {}, current.token);
-    current = { ...result.order, token: current.token };
+    await checkWalletNetwork(reviewed.network);
+    stillReviewing();
+    const activeClient = client,
+      generation = walletGeneration;
+    const result = await api(`/api/orders/${reviewed.id}/pay`, {}, reviewed.token);
+    save({ id: reviewed.id, token: reviewed.token, brand: result.order.brand });
+    stillReviewing();
+    if (
+      result.order.id !== reviewed.id ||
+      result.order.network !== reviewed.network ||
+      result.order.fundingMode !== reviewed.fundingMode
+    )
+      throw Error('Payment order changed. Check your saved order.');
+    current = { ...result.order, token: reviewed.token };
     save({ id: current.id, token: current.token, brand: current.brand });
     renderOrder();
+    if (reviewed.fundingMode === 'direct_swap') {
+      if (reviewed.directState === 'draft') return;
+      if (
+        reviewed.directState !== 'quote_ready' ||
+        current.directState !== 'payment_requested' ||
+        current.state !== 'payment_pending' ||
+        current.amountZatoshis !== reviewed.amountZatoshis
+      )
+        throw Error('Exact ZEC quote changed. Check your saved order before paying.');
+    }
     // A persisted payment request is never automatically replayed after interruption.
-    await checkWalletNetwork(current.network);
-    const submission = await client.requestPayment(current.paymentUri);
-    const updated = await api(
-      `/api/orders/${current.id}/submitted`,
-      { txid: submission.txid },
-      current.token,
+    await checkWalletNetwork(reviewed.network);
+    stillReviewing();
+    if (client !== activeClient || walletGeneration !== generation)
+      throw Error('Wallet connection changed. Check your saved order.');
+    const order = result.order;
+    if (
+      reviewed.fundingMode === 'direct_swap' &&
+      (!Number.isSafeInteger(order.paymentApprovalExpiresAt) ||
+        order.paymentApprovalExpiresAt <= now())
+    )
+      throw Error('Direct payment approval deadline is unavailable or expired.');
+    const submission = await activeClient.requestPayment(
+      order.paymentUri,
+      reviewed.fundingMode === 'direct_swap' ? { expiresAt: order.paymentApprovalExpiresAt } : {},
     );
-    current = { ...updated.order, token: current.token };
+    const updated = await api(
+      `/api/orders/${reviewed.id}/submitted`,
+      { txid: submission.txid },
+      reviewed.token,
+    );
+    if (sameOrder()) current = { ...updated.order, token: reviewed.token };
     toast('Payment sent. Checking confirmation.');
   } catch (e) {
-    error('checkout-error', e);
-    if (current.state === 'payment_pending')
+    if (sameOrder()) error('checkout-error', e);
+    else toast('Check the original order’s saved link and wallet Activity.');
+    if (sameOrder() && current.state === 'payment_pending')
       $('order-status').textContent =
         'The wallet request ended. Check wallet Activity and your order status before sending another payment. Your order is saved.';
   } finally {
@@ -642,6 +772,7 @@ $('cancel-order').onclick = async () => {
   }
 };
 $('refund-order').onclick = () => {
+  if (current.fundingMode === 'direct_swap') return;
   const form = document.createElement('form'),
     label = document.createElement('label'),
     input = document.createElement('input'),
@@ -738,6 +869,10 @@ try {
       ? 'Direct checkout is being prepared: your wallet sends ZEC to the swap provider, which pays Cryptorefills in USDC on Solana. Zucchini does not receive these funds. Checkout remains unavailable.'
       : 'Zucchini converts your ZEC to pay your order.';
   $('catalog-preview').hidden = !config.catalogPreview;
+  $('catalog-preview').textContent =
+    config.catalogProvider === 'cryptorefills'
+      ? 'Preview of selected Cryptorefills gift cards. Solana prices and purchase eligibility are still being verified; purchases are unavailable.'
+      : 'Preview of the previous 0fiat catalog. Cryptorefills availability is still being verified; purchases are unavailable.';
   await loadCatalog();
   const hash = new URLSearchParams(location.hash.slice(1));
   if (

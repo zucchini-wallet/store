@@ -1,0 +1,25 @@
+{
+  "package": "@zucchinifi/dapp-sdk",
+  "version": "0.3.0-direct-payment.1",
+  "artifact": "zucchinifi-dapp-sdk-0.3.0-direct-payment.1-f67c973.tgz",
+  "source": {
+    "repository": "https://github.com/zucchini-wallet/dapp-sdk",
+    "commit": "f67c97348dae3873f87b1c4fd174cfccbdd584c5",
+    "branch": "staging",
+    "dirty": false
+  },
+  "node": "22.19.0",
+  "integrity": "sha512-3hblGT1A5ca2u3OOb4k8rM2vWNmbb9IvpRoJ88nXYTZ3v/JpJDmEWzmvUIgF/RRkHRTA6gAcsVYgRHALVoInBQ==",
+  "sha256": "a98d12640e80dd0562f2fee2dbffabb2454f1493f231b73a0d031b7ac6784a03",
+  "reproducibility": {
+    "consecutivePacks": 2,
+    "byteIdentical": true
+  },
+  "verification": {
+    "allSixEsmImports": true,
+    "cleanConsumerInstall": true,
+    "typescriptConsumer": true,
+    "sdkTests": 34,
+    "published": false
+  }
+}

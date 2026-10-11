@@ -14,6 +14,9 @@ export function loadConfig(env = process.env) {
     giftCardProvider: env.GIFT_CARD_PROVIDER ?? '0fiat',
     cryptorefillsPartnerId: env.CRYPTOREFILLS_PARTNER_ID,
     gatewayOrigin: env.GATEWAY_ORIGIN,
+    gatewayAppId: env.GATEWAY_APP_ID,
+    directApprovalSeconds: number('DIRECT_APPROVAL_SECONDS', 120, 60, 600),
+    directSettlementMarginSeconds: number('DIRECT_SETTLEMENT_MARGIN_SECONDS', 600, 300, 1800),
     solanaRpcUrl: env.SOLANA_RPC_URL,
     outgoingEvidenceOrigin: env.OUTGOING_EVIDENCE_ORIGIN,
     merchantAccountId: env.MERCHANT_ACCOUNT_ID,
@@ -56,6 +59,8 @@ export function loadConfig(env = process.env) {
     throw Error('Invalid funding mode');
   if (c.fundingMode === 'direct_swap' && c.giftCardProvider !== 'cryptorefills')
     throw Error('Direct swap requires Cryptorefills');
+  if (c.fundingMode === 'direct_swap' && network !== 'mainnet')
+    throw Error('Direct swap requires mainnet');
   if (c.fundingMode === 'shielded_buffer' && c.checkoutEnabled)
     throw Error(
       'Buffered checkout requires reviewed settlement adapters; production activation is blocked.',

@@ -6,6 +6,12 @@ const API_ORIGIN = 'https://api.cryptorefills.com';
 const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const LOGO_HOSTS = new Set(['cdn.cryptorefills.com', 'cryptorefills.s3-eu-west-1.amazonaws.com']);
+export const CRYPTOREFILLS_DIRECT_PRICE_POLICY = Object.freeze({
+  coin: 'USDC',
+  network: 'Solana',
+  networkVerified: false,
+  source: 'provider_invoice_required',
+});
 
 function demand(condition, message) {
   if (!condition) throw Error(message);
@@ -96,6 +102,11 @@ export function normalizeCryptorefillsCatalog(raw, countryCode) {
     const common = brand(group, countryCode);
     demand(Array.isArray(group.products), 'Missing provider products');
     for (const product of group.products) {
+      // Ordinary emailed gift cards only. Neither absent identity flags nor a
+      // catalog USDC price establishes partner eligibility or Solana pricing.
+      const productType = product?.product_type ?? group.product_type;
+      if (product?.delivery_type !== 'by_email' || !['digital', 'physical'].includes(productType))
+        continue;
       demand(typeof product?.is_dynamic === 'boolean', 'Missing denomination mode');
       demand(product.coin === 'USDC', 'Catalog is not priced in USDC');
       const providerProductId = uuid(product.product_id);
@@ -103,6 +114,12 @@ export function normalizeCryptorefillsCatalog(raw, countryCode) {
       const amount = product.face_value?.amount;
       const record = {
         ...common,
+        kind: 'giftcard',
+        deliveryType: 'by_email',
+        productType,
+        identityRequirementsVerified: false,
+        checkoutEligible: false,
+        networkVerified: false,
         id: `cryptorefills:${countryCode}:${providerProductId}`,
         providerProductId,
         currency: fiatCurrency,
@@ -139,6 +156,147 @@ export function normalizeCryptorefillsCatalog(raw, countryCode) {
     }
   }
   return uniqueRecords(records, 'id');
+}
+
+/** Validate a normalized import without accepting prices, aliases or fake IDs. */
+export function validateCryptorefillsCatalogRecord(input) {
+  onlyKeys(input, [
+    'provider',
+    'providerBrandId',
+    'brandName',
+    'familyName',
+    'countryCode',
+    'iconUrl',
+    'available',
+    'kind',
+    'deliveryType',
+    'productType',
+    'identityRequirementsVerified',
+    'checkoutEligible',
+    'networkVerified',
+    'id',
+    'providerProductId',
+    'currency',
+    'denominationMode',
+    'providerDenomination',
+    'faceValue',
+    'range',
+    'name',
+    'denominations',
+    'minAmount',
+    'maxAmount',
+    'stepAmount',
+  ]);
+  demand(
+    input.provider === 'cryptorefills' &&
+      input.kind === 'giftcard' &&
+      input.deliveryType === 'by_email' &&
+      ['digital', 'physical'].includes(input.productType),
+    'Unsupported Cryptorefills catalog scope',
+  );
+  demand(
+    input.identityRequirementsVerified === false &&
+      input.checkoutEligible === false &&
+      input.networkVerified === false,
+    'Cryptorefills catalog cannot establish checkout readiness',
+  );
+  const countryCode = country(input.countryCode);
+  const providerProductId = uuid(input.providerProductId);
+  const id = `cryptorefills:${countryCode}:${providerProductId}`;
+  demand(input.id === id && typeof input.available === 'boolean', 'Invalid catalog identity');
+  const record = {
+    provider: 'cryptorefills',
+    providerBrandId: uuid(input.providerBrandId),
+    brandName: text(input.brandName, 'Missing exact provider brand'),
+    familyName: text(input.familyName, 'Missing provider family'),
+    countryCode,
+    iconUrl: logo(input.iconUrl),
+    available: input.available,
+    kind: 'giftcard',
+    deliveryType: 'by_email',
+    productType: input.productType,
+    identityRequirementsVerified: false,
+    checkoutEligible: false,
+    networkVerified: false,
+    id,
+    providerProductId,
+    currency: currency(input.currency),
+    denominationMode: input.denominationMode,
+    providerDenomination: text(
+      input.providerDenomination,
+      'Missing exact provider denomination',
+      100,
+    ),
+  };
+  if (record.denominationMode === 'FIXED') {
+    demand(input.range == null && record.providerDenomination !== 'range', 'Invalid fixed product');
+    record.faceValue = positiveDecimal(input.faceValue);
+    record.name = `${record.brandName} ${record.providerDenomination}`;
+    record.denominations = [record.faceValue];
+    record.minAmount = record.faceValue;
+    record.maxAmount = record.faceValue;
+  } else {
+    demand(
+      record.denominationMode === 'FLEXIBLE' &&
+        record.providerDenomination === 'range' &&
+        input.faceValue == null,
+      'Invalid flexible product',
+    );
+    onlyKeys(input.range, ['min', 'max', 'step']);
+    const min = positiveDecimal(input.range.min),
+      max = positiveDecimal(input.range.max);
+    demand(new Decimal(min).lte(max), 'Invalid range limits');
+    record.range = {
+      min,
+      max,
+      ...(input.range.step == null ? {} : { step: positiveDecimal(input.range.step) }),
+    };
+    record.name = record.brandName;
+    record.denominations = [];
+    record.minAmount = min;
+    record.maxAmount = max;
+    if (record.range.step != null) record.stepAmount = record.range.step;
+  }
+  for (const field of ['name', 'denominations', 'minAmount', 'maxAmount', 'stepAmount']) {
+    if (input[field] !== undefined)
+      demand(
+        JSON.stringify(input[field]) === JSON.stringify(record[field]),
+        'Conflicting catalog presentation',
+      );
+  }
+  return record;
+}
+
+/** A fresh GET must still contain the exact selected product tuple before checkout. */
+export function matchCryptorefillsSelection(records, selected) {
+  const original = validateCryptorefillsCatalogRecord(selected);
+  const matches = records
+    .map(validateCryptorefillsCatalogRecord)
+    .filter((record) => record.id === original.id);
+  demand(
+    matches.length === 1 && original.available && matches[0].available,
+    'Selected product is unavailable',
+  );
+  const current = matches[0];
+  for (const field of [
+    'providerBrandId',
+    'brandName',
+    'familyName',
+    'countryCode',
+    'currency',
+    'providerDenomination',
+    'denominationMode',
+    'faceValue',
+    'range',
+    'deliveryType',
+    'productType',
+  ]) {
+    demand(
+      JSON.stringify(current[field]) === JSON.stringify(original[field]),
+      'Selected provider product changed',
+    );
+  }
+  return current;
 }
 
 /** Current documented USER_WALLET/USDC/Solana metadata, requiring the native six-decimal mint. */

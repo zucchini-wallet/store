@@ -27,6 +27,12 @@ export function validateFace(voucher, value) {
     d.gt(voucher.maxAmount)
   )
     throw new InputError('That amount is unavailable.');
+  if (voucher.provider === 'cryptorefills' && voucher.denominationMode === 'FLEXIBLE') {
+    // A missing provider step is not permission to offer arbitrary custom amounts.
+    const step = new Decimal(voucher.range?.step ?? NaN);
+    if (!step.isFinite() || step.lte(0) || !d.minus(voucher.minAmount).mod(step).eq(0))
+      throw new InputError('Choose an available provider amount.');
+  }
   return d.toFixed(2);
 }
 export function priceOrder(quote, { rate, rateAt, now, markupBps, maxUsd }) {

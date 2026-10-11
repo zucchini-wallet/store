@@ -8,8 +8,9 @@ separate from the wallet, gateway and merchant-domain registry.
 **Current launch state:** browse-only; direct customer-funded checkout is being
 prepared. The selected flow is customer ZEC → swap provider → invoice USDC
 directly to Cryptorefills. No merchant buffer or receipt collector is needed for
-that route. Reviewed provider responses, exact-output execution, wallet expiry,
-refund handling and a direct coordinator still block real-funds testing.
+that route. The direct coordinator, gateway execution/recovery source and wallet expiry are
+implemented. Reviewed v6 response mappings, Solana recipient/payment compatibility,
+gateway rollout and an updated wallet still block real-funds testing.
 
 ## Cryptorefills migration
 
@@ -45,29 +46,29 @@ on the cached catalog, rather than spending provider catalog quota per visitor.
 ## SDK integration
 
 The page imports `createZucchiniClient` and `discoverZucchiniProvider` from
-`@zucchinifi/dapp-sdk/zcash`. Connect requests `send_transaction` permission only.
-It checks the wallet network before payment. Connect and Pay are separate user
-actions. The backend determines the recipient, amount and unique memo and creates
-an ordinary ZIP-321 request. This uses Wallet 0.5.2's ordinary payment support;
-it does not claim verified merchant-registry enrollment or silently substitute
-an unsigned request for a rejected signed invoice.
+`@zucchinifi/dapp-sdk/zcash`. The pinned candidate SDK and its provenance are
+vendored so builds do not depend on an unpublished registry version. Direct
+checkout requests explicit transaction/address permissions, checks the network,
+and reads a refund address only on the customer's action.
+
+Connect, invoice/quote preparation and final Pay are separate actions. The direct
+payment uses the exact-output gateway quote and a memo-free transparent Zcash URI
+with mandatory quote-bound approval expiry. The updated wallet patch enforces that
+expiry before signing; older wallets fail without an unbounded retry.
 
 ```mermaid
 flowchart LR
-  A[Choose card and amount] --> B[Backend quote]
-  B --> C[Connect wallet]
-  C --> D[Confirm payment]
-  D --> E[Scanner verifies exact receipt]
-  E --> F[Required confirmations]
-  F --> G[0fiat order with stable clientOrderId]
-  G --> H[Card on private order page]
-  H --> I[Optional Resend email]
+  A[Choose card and caps] --> B[CR invoice and exact-output quote]
+  B --> C[Review exact ZEC payment]
+  C --> D[Explicit wallet approval]
+  D --> E[1Click pays CR directly in Solana USDC]
+  E --> F[Finalized payout and CR acceptance verified]
+  F --> G[Card on private order page and CR email]
 ```
 
-A browser-reported transaction ID is submission information only. Backend
-receipt reconciliation imports the SDK's merchant receipt functions; the local
-collector uses `@zucchinifi/zcash-scanner`. Neither module derives a spending key
-from a user's seed phrase.
+A browser transaction ID is a submission hint only. Zucchini receives neither the
+ZEC nor USDC. Historical 0fiat and buffered orders retain their original receipt
+verification/recovery; the direct coordinator does not depend on a merchant scanner.
 
 ## Deployment
 
@@ -104,7 +105,8 @@ npm exec wrangler -- deploy --dry-run
 npm audit
 ```
 
-Tests cover an HTTP checkout through receipt and mock delivery, encrypted
+Tests cover direct HTTP quote-then-pay, approval deadlines, lost responses,
+restart recovery, immutable evidence, UI races and legacy checkout. Encrypted
 persistence, provider recovery, duplicate fulfillment protection, stale/reorg
 receipts, monetary bounds, and email opt-in/retry behavior. Real gift-card
 fulfillment, real email delivery and a funded Zcash checkout remain launch gates.

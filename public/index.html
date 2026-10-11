@@ -149,6 +149,32 @@
           ><input id="flexible-amount" type="number" min="1" step="0.01" hidden
         /></label>
         <p id="amount-hint" class="hint"></p>
+        <div id="direct-payment-inputs" hidden>
+          <label
+            >Maximum ZEC payment<input
+              id="max-zec"
+              type="text"
+              inputmode="decimal"
+              placeholder="0.10"
+          /></label>
+          <p class="hint">
+            Your cap excludes the wallet network fee. You review the exact ZEC quote before payment.
+          </p>
+          <label
+            >Your Zcash refund address<input
+              id="direct-refund-address"
+              type="text"
+              placeholder="t1… or t3…"
+              autocomplete="off"
+          /></label>
+          <button id="use-wallet-refund" type="button" class="text-button">
+            Use connected wallet address
+          </button>
+          <p class="hint">
+            Swap refunds and unused ZEC return here. This route uses transparent deposit and refund
+            addresses.
+          </p>
+        </div>
         <div class="email-choice">
           <label class="checkbox"
             ><input type="checkbox" id="email-opt" />Email me a copy when my card is ready</label

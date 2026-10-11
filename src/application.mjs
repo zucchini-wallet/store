@@ -5,6 +5,9 @@ import {
   validateShieldedAddress,
 } from './payment-memo.mjs';
 import { createCryptorefillsSettlement } from './cryptorefills-settlement.mjs';
+import { createDirectSettlement } from './direct-settlement.mjs';
+import { directPaymentUri, validateTransparentRefundAddress } from './direct-payment.mjs';
+import { SOLANA_USDC } from './solana-settlement.mjs';
 import { createSettlement } from './settlement.mjs';
 import { Buffer } from 'node:buffer';
 import { catalogPage } from './catalog.mjs';
@@ -21,6 +24,7 @@ export function createApp({
   priceFetcher = fetch,
   settlementAdapters,
   cryptorefillsAdapters,
+  directAdapters,
   runtimeReadiness,
   getSolanaBlockHeight,
 }) {
@@ -32,6 +36,7 @@ export function createApp({
     now: clock,
   });
   const buckets = new Map();
+  const direct = createDirectSettlement({ store, config, adapters: directAdapters, now: clock });
   let priceCache, balanceCache;
   const now = clock;
   function limited(key, max = 30) {
@@ -75,23 +80,72 @@ export function createApp({
   }
   let scannerHeartbeat = 0;
   const liveReady = () =>
-    Boolean(
-      config.checkoutEnabled &&
-        provider &&
-        catalog.fetchedAt &&
-        (config.giftCardProvider !== 'cryptorefills' ||
-          (catalog.provider === 'cryptorefills' &&
-            config.fundingMode === 'shielded_buffer' &&
-            cryptorefillsAdapters &&
-            provider.quoteProduct)) &&
-        Date.now() - Date.parse(catalog.fetchedAt) < 48 * 3600000 &&
-        now() - scannerHeartbeat <= 90,
-    );
+    config.fundingMode === 'direct_swap'
+      ? Boolean(
+          config.checkoutEnabled &&
+            config.fulfillmentEnabled &&
+            directAdapters &&
+            provider?.quoteProduct &&
+            runtimeReadiness?.checkoutActivatable &&
+            catalog.provider === 'cryptorefills' &&
+            catalog.fetchedAt &&
+            Date.now() - Date.parse(catalog.fetchedAt) < 48 * 3600000,
+        )
+      : Boolean(
+          config.checkoutEnabled &&
+            provider &&
+            catalog.fetchedAt &&
+            (config.giftCardProvider !== 'cryptorefills' ||
+              (catalog.provider === 'cryptorefills' &&
+                config.fundingMode === 'shielded_buffer' &&
+                cryptorefillsAdapters &&
+                provider.quoteProduct)) &&
+            Date.now() - Date.parse(catalog.fetchedAt) < 48 * 3600000 &&
+            now() - scannerHeartbeat <= 90,
+        );
   const catalogPreview = () =>
     config.giftCardProvider === 'cryptorefills' &&
-    catalog.provider !== 'cryptorefills' &&
+    (catalog.provider !== 'cryptorefills' || catalog.previewOnly === true) &&
     !config.checkoutEnabled;
   function publicOrder(o) {
+    if (o.fundingMode === 'direct_swap') {
+      let uri;
+      if (o.direct?.state === 'payment_requested') {
+        try {
+          uri = directPaymentUri(o.direct.binding, { now: now() });
+        } catch {
+          /* Expired */
+        }
+      }
+      return {
+        id: o.id,
+        giftCardProvider: 'cryptorefills',
+        fundingMode: o.fundingMode,
+        brand: o.brand,
+        name: o.name,
+        iconUrl: o.iconUrl,
+        country: o.country,
+        faceAmount: o.faceAmount,
+        currency: o.currency,
+        totalUsd: o.totalUsd,
+        expectedUsdcAtomic: o.expectedUsdcAtomic,
+        amountZatoshis: o.amountZatoshis,
+        maxInputZatoshis: o.maxInputZatoshis,
+        refundAddress: o.refundAddress,
+        network: o.network,
+        recipient: o.recipient,
+        expiresAt: o.expiresAt,
+        quoteExpiresAt: o.quoteExpiresAt,
+        state: o.state,
+        directState: o.direct?.state,
+        settlementState: o.direct?.state,
+        supportEmail: config.supportEmail,
+        ...(uri
+          ? { paymentUri: uri, paymentApprovalExpiresAt: o.direct.binding.latestApprovalAt }
+          : {}),
+        ...(o.state === 'delivered' ? { card: o.card } : {}),
+      };
+    }
     const receipt =
       o.state === 'quoted' ? undefined : reconcile(o, o.snapshot, now(), config.confirmations);
     return {
@@ -225,11 +279,26 @@ export function createApp({
             throw new InputError(e.message, 409);
           }
         }
+        if (req.method === 'POST' && u.pathname === '/internal/direct') {
+          const b = await body(req);
+          if (!['poll', 'recover_invoice', 'recover_swap', 'recover_cancel'].includes(b.action))
+            throw new InputError('Unknown direct recovery action');
+          try {
+            return json(200, { direct: await direct.act(b.orderId, b.action) });
+          } catch {
+            throw new InputError('Direct recovery unavailable; review the saved order.', 409);
+          }
+        }
         if (req.method === 'GET' && u.pathname === '/internal/orders')
           return json(200, {
             orders: store
               .all()
-              .filter((o) => o.state !== 'quoted' && o.state !== 'cancelled')
+              .filter(
+                (o) =>
+                  o.fundingMode !== 'direct_swap' &&
+                  o.state !== 'quoted' &&
+                  o.state !== 'cancelled',
+              )
               .map((o) => ({
                 id: o.id,
                 network: o.network,
@@ -255,7 +324,8 @@ export function createApp({
         if (req.method === 'POST' && u.pathname === '/internal/receipt') {
           const { orderId, snapshot } = await body(req);
           const o = store.get(orderId);
-          if (!o || o.state === 'quoted') throw new InputError('Unknown payment');
+          if (!o || o.fundingMode === 'direct_swap' || o.state === 'quoted')
+            throw new InputError('Unknown payment');
           if (o.snapshot && snapshot.sequence <= o.snapshot.sequence)
             throw new InputError('Stale scanner sequence');
           const receipt = reconcile(o, snapshot, now(), config.confirmations);
@@ -295,7 +365,10 @@ export function createApp({
                 refundAddress: o.refundAddress,
                 refundTxid: o.refundTxid,
                 refundRequested: o.refundRequested,
-                receipt: reconcile(o, o.snapshot, now(), config.confirmations),
+                receipt:
+                  o.fundingMode === 'direct_swap'
+                    ? o.direct?.payout
+                    : reconcile(o, o.snapshot, now(), config.confirmations),
                 audit: o.audit ?? [],
               })),
           });
@@ -304,6 +377,7 @@ export function createApp({
           const o = store.get(b.orderId);
           if (
             !o ||
+            o.fundingMode === 'direct_swap' ||
             !o.refundRequested ||
             !b.actor ||
             b.actor.length > 80 ||
@@ -334,6 +408,7 @@ export function createApp({
             checkoutReady: liveReady(),
             catalogPreview: catalogPreview(),
             catalogProvider: catalog.provider ?? '0fiat',
+            catalogSelectionScope: catalog.selectionScope,
             emailAvailable: Boolean(config.resendKey && config.emailFrom),
             supportEmail: config.supportEmail,
             catalogUpdatedAt: catalog.fetchedAt,
@@ -365,13 +440,17 @@ export function createApp({
           if (!liveReady())
             throw new InputError('Checkout is being prepared. Please come back soon.', 503);
           const b = await body(req),
-            v = catalog.vouchers.find((v) => v.voucherId === Number(b.voucherId));
+            v = catalog.vouchers.find((v) =>
+              config.fundingMode === 'direct_swap'
+                ? v.id === b.id && typeof b.id === 'string'
+                : v.voucherId === Number(b.voucherId),
+            );
           if (!v) throw new InputError('Gift card unavailable.');
           const faceAmount = validateFace(v, b.amount);
           const isCryptorefills = config.giftCardProvider === 'cryptorefills';
           if (
             isCryptorefills &&
-            (config.fundingMode !== 'shielded_buffer' ||
+            (!['shielded_buffer', 'direct_swap'].includes(config.fundingMode) ||
               b.providerTermsAccepted !== true ||
               b.providerPrivacyAccepted !== true ||
               typeof b.email !== 'string' ||
@@ -393,6 +472,7 @@ export function createApp({
           // Cryptorefills catalog/price responses require a reviewed normalizer.
           if (
             isCryptorefills &&
+            config.fundingMode !== 'direct_swap' &&
             typeof v.providerDenominations?.[faceAmount] !== 'string' &&
             v.denominationMode !== 'FLEXIBLE'
           )
@@ -403,6 +483,70 @@ export function createApp({
                 userAgent: req.headers['user-agent'],
               })
             : await provider.request(`/quote?voucherId=${v.voucherId}&amount=${faceAmount}`);
+          if (config.fundingMode === 'direct_swap') {
+            if (typeof v.providerDenomination !== 'string' || !v.providerDenomination)
+              throw new InputError('Reviewed provider denomination unavailable.', 503);
+            if (
+              q.providerProductId !== v.providerProductId ||
+              q.country !== v.countryCode ||
+              q.brand !== v.brandName ||
+              !new Decimal(q.faceAmount).eq(faceAmount) ||
+              q.coin !== 'USDC' ||
+              q.network !== 'Solana' ||
+              q.mint !== SOLANA_USDC.mint ||
+              q.networkVerified !== true ||
+              q.identityRequirementsVerified !== true ||
+              q.checkoutEligible !== true ||
+              !/^[1-9][0-9]{0,19}$/.test(q.amountAtomic ?? '') ||
+              BigInt(q.amountAtomic) > BigInt(config.maxUsd) * 1000000n
+            )
+              throw new InputError('Verified product price for Solana USDC is unavailable.', 503);
+            if (
+              !/^[1-9][0-9]{0,15}$/.test(b.maxInputZatoshis ?? '') ||
+              BigInt(b.maxInputZatoshis) > 2100000000000000n
+            )
+              throw new InputError('Enter your maximum Zcash payment amount.');
+            try {
+              validateTransparentRefundAddress(b.refundAddress);
+            } catch {
+              throw new InputError(
+                'Enter your own valid mainnet transparent Zcash refund address.',
+              );
+            }
+            const order = {
+              id: randomUUID(),
+              giftCardProvider: 'cryptorefills',
+              fundingMode: 'direct_swap',
+              providerProductId: v.providerProductId,
+              providerProduct: {
+                brand_name: v.brandName,
+                country_code: v.countryCode,
+                denomination: v.providerDenomination,
+                ...(v.denominationMode === 'FLEXIBLE' ? { product_value: Number(faceAmount) } : {}),
+              },
+              customerIp: ip,
+              providerConsent: { terms: true, privacy: true, acceptedAt: now() },
+              email: b.email,
+              brand: v.brandName,
+              name: v.name,
+              iconUrl: v.iconUrl,
+              country: v.countryCode,
+              currency: v.currency,
+              faceAmount,
+              expectedUsdcAtomic: q.amountAtomic,
+              totalUsd: new Decimal(q.amountAtomic).div(1e6).toString(),
+              maxInputZatoshis: b.maxInputZatoshis,
+              refundAddress: b.refundAddress,
+              network: config.network,
+              state: 'quoted',
+              direct: { state: 'draft', revision: 0 },
+              createdAt: now(),
+              quoteExpiresAt: now() + 120,
+            };
+            const token = randomBytes(32).toString('base64url');
+            store.insert(order, token);
+            return json(201, { order: publicOrder(order), token });
+          }
           if (Number(q.voucherId) !== v.voucherId || !new Decimal(q.faceAmount).eq(faceAmount))
             throw new InputError('Gift-card price changed. Try again.', 503);
           const r = await rate(),
@@ -501,6 +645,30 @@ export function createApp({
           if (req.method === 'GET' && !match[2]) return json(200, { order: publicOrder(o) });
           if (req.method === 'POST') {
             const b = await body(req);
+            if (o.fundingMode === 'direct_swap') {
+              try {
+                if (match[2] === 'pay') {
+                  if (!liveReady()) throw Error('Direct checkout is unavailable');
+                  if (o.direct?.state === 'draft') {
+                    await direct.act(o.id, 'prepare');
+                    await direct.act(o.id, 'prepare_swap');
+                    // Return the exact quote for a separate review before requesting wallet payment.
+                  } else await direct.act(o.id, 'begin_payment');
+                } else if (match[2] === 'submitted') await direct.act(o.id, 'submitted', b);
+                else if (match[2] === 'cancel') await direct.act(o.id, 'cancel');
+                else if (match[2] === 'refund')
+                  throw Error(
+                    'Cryptorefills handles eligible USDC refunds through its emailed refund form.',
+                  );
+                else throw Error('Unknown action');
+              } catch {
+                throw new InputError(
+                  'This order requires review. Check its saved status before trying again.',
+                  409,
+                );
+              }
+              return json(200, { order: publicOrder(store.get(o.id)) });
+            }
             store.update(o.id, (r) => {
               if (match[2] === 'pay') {
                 if (r.state === 'payment_pending') return;
@@ -558,6 +726,7 @@ export function createApp({
       if (!config.fulfillmentEnabled) return;
       await settlement.tick();
       await cryptorefills.tick();
+      await direct.tick();
     },
     close: () => store.close(),
   };

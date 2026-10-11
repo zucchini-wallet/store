@@ -60,5 +60,15 @@ export function createEncryptedStore(db, key) {
         }
       });
     },
+    claimEvidence(id, reference) {
+      if (typeof reference !== 'string' || reference.length > 256 || !reference.length)
+        throw Error('Invalid payment evidence reference');
+      return db.transaction(() => {
+        const key = 'evidence/' + reference;
+        const old = db.prepare('SELECT order_id FROM receipts WHERE id=?').get(key);
+        if (old && old.order_id !== id) throw Error('Payment evidence already assigned');
+        db.prepare('INSERT OR IGNORE INTO receipts VALUES(?,?)').run(key, id);
+      });
+    },
   };
 }

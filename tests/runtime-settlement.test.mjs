@@ -90,7 +90,7 @@ test('selected direct flow never composes merchant custody and cannot be activat
   assert.equal(runtime.provider, undefined);
   assert.ok(!runtime.runtimeReadiness.blockers.includes('solana_rpc_buffer_and_fee_policy'));
   assert.ok(
-    runtime.runtimeReadiness.blockers.includes('gateway_exact_output_execution_and_recovery'),
+    runtime.runtimeReadiness.blockers.includes('gateway_exact_output_route_review_and_deployment'),
   );
   assert.ok(
     !JSON.stringify(runtime.runtimeReadiness).includes(values.CRYPTOREFILLS_BACKUP_PARTNER_KEY),

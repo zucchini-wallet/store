@@ -1,7 +1,7 @@
 import { createRuntimeSettlement } from './runtime-settlement.mjs';
 import { credentials } from './credentials.mjs';
 import { createApp } from './application.mjs';
-import { catalogPage, cleanCatalog } from './catalog.mjs';
+import { catalogPage, cleanCatalog, cleanCatalogDocument } from './catalog.mjs';
 import { createServer } from 'node:http';
 import { readFile, mkdir, writeFile } from 'node:fs/promises';
 import { resolve, extname } from 'node:path';
@@ -30,8 +30,10 @@ if (isMain) {
   const store = createStore(resolve(config.dataDir, 'store.sqlite'), config.encryptionKey);
   let catalog;
   try {
-    catalog = JSON.parse(await readFile(resolve(config.dataDir, 'catalog.json'), 'utf8'));
-    catalog.vouchers = cleanCatalog(catalog.vouchers);
+    catalog = cleanCatalogDocument(
+      JSON.parse(await readFile(resolve(config.dataDir, 'catalog.json'), 'utf8')),
+    );
+    if (catalog.provider === 'cryptorefills') catalog.previewOnly = true;
   } catch {
     catalog = { fetchedAt: null, vouchers: [] };
   }
@@ -74,7 +76,7 @@ if (isMain) {
           }[extname(file)] ?? 'application/octet-stream',
         'X-Content-Type-Options': 'nosniff',
         'Content-Security-Policy':
-          "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' https://0fiat.com https://cdn.cryptorefills.com; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+          "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' https://0fiat.com https://cdn.cryptorefills.com https://cryptorefills.s3-eu-west-1.amazonaws.com; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
         'Referrer-Policy': 'no-referrer',
       });
       res.end(bytes);
