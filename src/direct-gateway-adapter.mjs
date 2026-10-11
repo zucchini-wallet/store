@@ -18,7 +18,7 @@ export function createDirectGatewayAdapter({
       headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(20000),
-      redirect: 'error',
+      redirect: 'manual',
     });
     if (r.status === 401) session.invalidate();
     // A transport error or expired auth never replays an execution quote.

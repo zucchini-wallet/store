@@ -79,7 +79,7 @@ function mock(overrides = {}, transform) {
     fetcher: async (url, options) => {
       assert.equal(url, 'https://rpc.example.test/merchant');
       assert.equal(options.method, 'POST');
-      assert.equal(options.redirect, 'error');
+      assert.equal(options.redirect, 'manual');
       assert.equal(options.headers['Content-Type'], 'application/json');
       assert.ok(options.signal instanceof AbortSignal);
       const call = JSON.parse(options.body);

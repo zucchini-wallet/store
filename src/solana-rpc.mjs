@@ -10,7 +10,11 @@ import {
 } from './solana-settlement.mjs';
 
 const demand = (ok, message) => {
-  if (!ok) throw Error(message);
+  if (!ok) {
+    const error = Error(message);
+    error.code = message.toLowerCase().replace(/[^a-z]+/g, '_');
+    throw error;
+  }
 };
 const safeNumber = (value) => Number.isSafeInteger(value) && value >= 0;
 const atomic = (value) =>
@@ -59,13 +63,27 @@ export function createSolanaRpc({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ jsonrpc: '2.0', id, method, params }),
-        redirect: 'error',
+        // workerd supports manual/follow only. A returned 3xx fails response.ok.
+        redirect: 'manual',
         signal: AbortSignal.timeout(timeoutMs),
       });
-    } catch {
-      throw Error('Solana RPC unavailable');
+    } catch (error) {
+      const code = /illegal invocation/i.test(error?.message ?? '')
+        ? 'solana_rpc_fetch_receiver'
+        : ['TimeoutError', 'AbortError'].includes(error?.name)
+          ? 'solana_rpc_timeout'
+          : /redirect/i.test(error?.message ?? '')
+            ? 'solana_rpc_redirect'
+            : 'solana_rpc_transport';
+      throw Object.assign(Error('Solana RPC unavailable'), { code });
     }
-    demand(response.ok, 'Solana RPC unavailable');
+    if (!response.ok) {
+      await response.body?.cancel();
+      throw Object.assign(Error('Solana RPC unavailable'), {
+        code: 'solana_rpc_http',
+        upstreamStatus: response.status,
+      });
+    }
     const length = response.headers.get('Content-Length');
     demand(
       length === null || (/^[0-9]+$/.test(length) && Number(length) <= maxResponseBytes),
@@ -87,7 +105,9 @@ export function createSolanaRpc({
         parts.push(value);
       }
     } catch {
-      throw Error('Solana RPC response unavailable or too large');
+      throw Object.assign(Error('Solana RPC response unavailable or too large'), {
+        code: 'solana_rpc_body',
+      });
     } finally {
       reader.releaseLock();
     }
@@ -101,7 +121,7 @@ export function createSolanaRpc({
     try {
       body = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
     } catch {
-      throw Error('Invalid Solana RPC response');
+      throw Object.assign(Error('Invalid Solana RPC response'), { code: 'solana_rpc_json' });
     }
     demand(
       body?.jsonrpc === '2.0' &&

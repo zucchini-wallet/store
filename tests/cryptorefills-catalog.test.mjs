@@ -282,7 +282,7 @@ test('public GET client serializes requests, spaces them, and sends no customer/
   for (const { url, init } of requests) {
     assert.equal(url.origin, 'https://api.cryptorefills.com');
     assert.equal(init.method, 'GET');
-    assert.equal(init.redirect, 'error');
+    assert.equal(init.redirect, 'manual');
     assert.equal(init.cache, 'no-store');
     assert.equal(init.body, undefined);
     assert.equal(init.headers['X-Cr-Application'], 'public-referral');

@@ -35,7 +35,7 @@ export function createCryptorefillsProvider({ key, backupKey }, { fetcher = fetc
           'Content-Type': 'application/json',
         },
         ...(serialized ? { body: serialized } : {}),
-        redirect: 'error',
+        redirect: 'manual',
         signal: AbortSignal.timeout(20000),
       });
     let response = await send(activeKey);

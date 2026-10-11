@@ -183,7 +183,7 @@ test('provider errors redact upstream text and redirects are rejected', async ()
     { key: 'secret' },
     {
       fetcher: async (_url, opts) => {
-        assert.equal(opts.redirect, 'error');
+        assert.equal(opts.redirect, 'manual');
         return new Response('{"code":"KYC_MISSING","detail":"secret buyer@example.com"}', {
           status: 422,
         });

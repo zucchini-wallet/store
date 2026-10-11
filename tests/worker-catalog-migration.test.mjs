@@ -6,6 +6,7 @@ import { join, resolve } from 'node:path';
 import { Buffer } from 'node:buffer';
 import { build } from 'esbuild';
 import { Miniflare, Log, LogLevel, convertV4MiniflareOptions } from 'miniflare';
+import { SOLANA_USDC } from '../src/solana-settlement.mjs';
 
 // Use Wrangler's installed local workerd/SQLite runtime. Explicit synthetic
 // bindings avoid Wrangler config discovery and .dev.vars; outbound IO is denied.
@@ -245,4 +246,99 @@ test('configured direct Worker initializes gateway Ed25519 keys and reports bloc
   for (const privateValue of [installationSeed, primaryKey, adminToken])
     assert.equal(JSON.stringify({ config, health }).includes(privateValue), false);
   assert.equal(outboundCalls, 0);
+});
+
+test('actual direct Worker reads finalized Solana height through bounded JSON-RPC with preserved response IDs', async (t) => {
+  const adminToken = 'c'.repeat(32);
+  const requests = [];
+  const attemptedRequests = [];
+  let redirectResponse = false;
+  const runtime = new Miniflare(
+    convertV4MiniflareOptions({
+      name: 'synthetic-direct-solana-rpc',
+      script: await productionScript(),
+      modules: true,
+      compatibilityDate: '2026-09-14',
+      compatibilityFlags: ['nodejs_compat'],
+      durableObjects: { STORE: { className: 'Store', useSQLite: true } },
+      bindings: {
+        PUBLIC_ORIGIN: 'https://store.example',
+        NETWORK: 'mainnet',
+        GIFT_CARD_PROVIDER: 'cryptorefills',
+        FUNDING_MODE: 'direct_swap',
+        CHECKOUT_ENABLED: 'false',
+        FULFILLMENT_ENABLED: 'false',
+        DATA_ENCRYPTION_KEY: 'e'.repeat(64),
+        ADMIN_TOKEN: adminToken,
+        CRYPTOREFILLS_PARTNER_KEY: 'synthetic-cryptorefills-primary',
+        GATEWAY_INSTALLATION_SEED: Buffer.alloc(32, 7).toString('base64url'),
+        GATEWAY_ORIGIN: 'https://gateway.example',
+        GATEWAY_APP_ID: 'store.example',
+        SOLANA_RPC_URL: 'https://solana.example',
+      },
+      cf: false,
+      unsafeRegisterWorker: false,
+      log: new Log(LogLevel.ERROR),
+      async outboundService(request) {
+        attemptedRequests.push({ url: request.url, method: request.method });
+        assert.equal(
+          request.url,
+          'https://solana.example/',
+          'Only the synthetic Solana endpoint is allowed',
+        );
+        assert.equal(request.method, 'POST');
+        assert.equal(request.headers.get('Content-Type'), 'application/json');
+        const body = await request.json();
+        assert.equal(body.jsonrpc, '2.0');
+        assert.ok(Number.isSafeInteger(body.id) && body.id > 0);
+        assert.ok(['getGenesisHash', 'getBlockHeight'].includes(body.method));
+        requests.push(body);
+        if (redirectResponse) {
+          return new Response(null, {
+            status: 307,
+            headers: { Location: 'https://must-not-follow.example/' },
+          });
+        }
+        return new Response(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: body.id,
+            result: body.method === 'getGenesisHash' ? SOLANA_USDC.genesisHash : 123456,
+          }),
+          { headers: { 'Content-Type': 'application/json' } },
+        );
+      },
+    }),
+  );
+  t.after(() => runtime.dispose());
+  const unauthorized = await runtime.dispatchFetch('https://store.example/internal/solana-height');
+  assert.equal(unauthorized.status, 401);
+  assert.equal(requests.length, 0);
+  const response = await runtime.dispatchFetch('https://store.example/internal/solana-height', {
+    headers: { Authorization: `Bearer ${adminToken}` },
+  });
+  const body = await response.json();
+  assert.equal(response.status, 200, JSON.stringify(body));
+  assert.deepEqual(body, { blockHeight: 123456 });
+  assert.deepEqual(requests, [
+    { jsonrpc: '2.0', id: 1, method: 'getGenesisHash', params: [] },
+    { jsonrpc: '2.0', id: 2, method: 'getBlockHeight', params: [{ commitment: 'finalized' }] },
+  ]);
+  redirectResponse = true;
+  const redirected = await runtime.dispatchFetch('https://store.example/internal/solana-height', {
+    headers: { Authorization: `Bearer ${adminToken}` },
+  });
+  assert.equal(redirected.status, 503);
+  assert.equal((await redirected.json()).error, 'Solana RPC check failed.');
+  assert.deepEqual(requests[2], {
+    jsonrpc: '2.0',
+    id: 3,
+    method: 'getGenesisHash',
+    params: [],
+  });
+  assert.deepEqual(
+    attemptedRequests,
+    Array.from({ length: 3 }, () => ({ url: 'https://solana.example/', method: 'POST' })),
+    'Redirect responses must not be followed or request finalized height',
+  );
 });

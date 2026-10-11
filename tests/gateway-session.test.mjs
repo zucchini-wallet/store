@@ -16,7 +16,7 @@ function mock(transform = (x) => x) {
     appId: 'store.example',
     now: () => time,
     fetcher: async (url, options) => {
-      assert.equal(options.redirect, 'error');
+      assert.equal(options.redirect, 'manual');
       const body = JSON.parse(options.body);
       calls.push({ url: url.href, body });
       if (url.pathname === '/v1/auth/challenges') {

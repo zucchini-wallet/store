@@ -20,7 +20,7 @@
     "FUNDING_MODE": "direct_swap",
     "GATEWAY_ORIGIN": "https://api.zucchinifi.xyz",
     "GATEWAY_APP_ID": "store.zucchinifi.xyz",
-    "SOLANA_RPC_URL": "https://solana.publicnode.com",
+    "SOLANA_RPC_URL": "https://solana-rpc.publicnode.com",
     "DIRECT_APPROVAL_SECONDS": "120",
     "DIRECT_SETTLEMENT_MARGIN_SECONDS": "600",
     "SETTLEMENT_NETWORK": "sol",

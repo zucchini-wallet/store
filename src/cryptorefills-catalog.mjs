@@ -449,7 +449,7 @@ export function createCryptorefillsCatalogClient(
         const response = await fetcher(url.href, {
           method: 'GET',
           headers,
-          redirect: 'error',
+          redirect: 'manual',
           cache: 'no-store',
           signal: controller.signal,
         });

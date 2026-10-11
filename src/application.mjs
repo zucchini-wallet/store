@@ -230,7 +230,20 @@ export function createApp({
         }
         if (req.method === 'GET' && u.pathname === '/internal/solana-height') {
           if (!getSolanaBlockHeight) throw new InputError('Solana RPC is not configured.', 503);
-          return json(200, { blockHeight: await getSolanaBlockHeight() });
+          try {
+            return json(200, { blockHeight: await getSolanaBlockHeight() });
+          } catch (e) {
+            return json(503, {
+              error: 'Solana RPC check failed.',
+              diagnostic: /^[a-z_]{1,80}$/.test(e.code ?? '') ? e.code : 'solana_rpc_unavailable',
+              upstreamStatus:
+                Number.isInteger(e.upstreamStatus) &&
+                e.upstreamStatus >= 300 &&
+                e.upstreamStatus <= 599
+                  ? e.upstreamStatus
+                  : undefined,
+            });
+          }
         }
         if (req.method === 'GET' && u.pathname === '/internal/settlements')
           return json(200, {
