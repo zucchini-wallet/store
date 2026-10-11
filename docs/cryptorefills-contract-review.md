@@ -75,22 +75,43 @@ customer's bound transparent Zcash address. Zucchini holds neither payment asset
 
 ## Precise provider questions still needed
 
-Request a versioned OpenAPI specification or redacted v6 creation/GET examples
-covering both unpaid and completed gift-card orders, plus these confirmations:
+A full specification is not required. Redacted examples from existing orders and
+the following confirmations are sufficient; do not create unpaid orders to obtain
+samples. The Node example already establishes `order.wallet_address`,
+`order.coin_amount`, `order.coin`, the order IDs and DELETE `CANCELED`.
 
-1. The v6 Node example confirms `wallet_address`, `coin_amount`, and `coin`.
-   What are their types/precision, and which fields establish the network, address
-   type and original payment/confirmation deadline (including idempotent retries)? Is the Solana deposit a canonical native-USDC
-   ATA, and can its owner be used by an owner-address withdrawal protocol?
-2. Does USER_WALLET accept an exact-output 1Click payout from a solver, rather than
-   a transaction signed by the purchaser? Does it require a memo or payer binding?
-3. How are paid, partial, late, expired, manual-review, delivery and refund states
-   represented? Which delivery fields bind the email/product and contain the code?
-4. Do v6 customer refunds use the customer's emailed address form with the same
-   USDC/Solana currency, fees, timing and claim window as the public guidance?
-5. How is the Solana network selected for pre-order prices and validations?
+1. **V6 response samples:** Please provide redacted POST creation and GET responses
+   for awaiting payment, completed/delivered, and cancelled/expired orders,
+   preserving field names and JSON types. Include network/address type, original
+   expiry, authoritative payment acceptance, beneficiary, product identifier,
+   brand/country/denomination and card/code fields. Definitions of partial, late,
+   manual-review and refund states are sufficient without a sample for each.
+2. **Pricing, precision and expiry:** Please show the exact Solana-selecting
+   price/validation request and one response for a selected family; `coin=USDC`
+   currently returns USDC-MATIC pricing. Confirm `coin_amount`'s JSON type, exact
+   conversion to six-decimal native-USDC atomic units, rounding and payable fees;
+   price validity; the original v6 expiry field's units/timezone and whether
+   arrival or confirmation must occur before it; and whether amount, address and
+   original expiry stay unchanged on the same `external_order_id` retry.
+3. **Invoice account and payout routing:** Cryptorefills: is the Solana invoice
+   destination an owner or an initialized canonical ATA for native USDC mint
+   `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`? Confirm the exact expected
+   account. Separately, 1Click must confirm that using its resolved owner as the
+   withdrawal recipient credits that same existing invoice ATA. Cryptorefills'
+   account description alone cannot establish 1Click's payout behavior.
+4. **Third-party payment:** Does `USER_WALLET` accept the exact-output 1Click solver
+   payout? Specify any purchaser-signature, payer-address or memo requirement;
+   the current route does not support such additional bindings.
+5. **Customer refund recovery:** Do v6 partner orders paid this way use the emailed
+   refund form, allowing the customer to supply their own Solana USDC address
+   rather than returning funds to the solver? Confirm applicable fees, timing,
+   ninety-day claim window and coupon cases. No conversion back to ZEC is promised.
+6. **Launch product eligibility:** For the selected country/families, which
+   authoritative fields or validation establish additional name/customer/KYC
+   requirements and product, regional and redemption restrictions? Missing
+   identity flags cannot establish eligibility; unsupported products stay excluded.
 
-This is a draft request only. No message was sent to Cryptorefills.
+These are draft requests only. No message was sent to Cryptorefills or 1Click.
 
 ## Code and next test boundary
 
